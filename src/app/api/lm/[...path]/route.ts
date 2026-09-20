@@ -12,6 +12,8 @@
  * per-request in the Authorization header and is forwarded without storage.
  */
 
+import { log } from "@/lib/log";
+
 export const dynamic = "force-dynamic";
 
 const PROXY_BASE_HEADER = "x-lm-base-url";
@@ -44,8 +46,13 @@ function resolveTarget(req: Request, path: string[]): { url: string } | { error:
 }
 
 async function forward(req: Request, path: string[]): Promise<Response> {
+  const started = Date.now();
   const target = resolveTarget(req, path);
   if ("error" in target) {
+    log.warn("proxy", "rejected", target.error, {
+      code: String(target.status),
+      data: { method: req.method, path: path.join("/") },
+    });
     return Response.json({ error: target.error }, { status: target.status });
   }
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -61,7 +68,13 @@ async function forward(req: Request, path: string[]): Promise<Response> {
       headers,
       body: req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer(),
     });
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error("proxy", "upstream_unreachable", "Cannot reach local model server", {
+      code: "502",
+      durationMs: Date.now() - started,
+      data: { url: target.url, method: req.method, cause: message },
+    });
     return Response.json(
       { error: "Cannot reach the local model server. Is LM Studio running with the local server enabled?" },
       { status: 502 },
@@ -69,6 +82,12 @@ async function forward(req: Request, path: string[]): Promise<Response> {
   }
   const body = await upstream.arrayBuffer();
   const contentTypeOut = upstream.headers.get("content-type") ?? "application/json";
+  const level = upstream.ok ? "info" : "error";
+  log[level]("proxy", "upstream", `${req.method} ${target.url} → ${upstream.status}`, {
+    code: String(upstream.status),
+    durationMs: Date.now() - started,
+    data: { bytes: body.byteLength, ok: upstream.ok },
+  });
   return new Response(body, { status: upstream.status, headers: { "Content-Type": contentTypeOut } });
 }
 

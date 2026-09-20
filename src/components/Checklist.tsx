@@ -44,7 +44,7 @@ export default function Checklist({ checks }: { checks: ComplianceCheck[] }) {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">{check.label}</span>
-                  <span className="rounded-full bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-medium text-white">
+                  <span className="rounded-md bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-medium text-white">
                     {check.ruleRef}
                   </span>
                 </div>

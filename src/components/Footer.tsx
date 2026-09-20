@@ -1,101 +1,72 @@
-import Link from "next/link";
-import { Mail, MapPin, Phone, Scale } from "lucide-react";
+"use client";
 
-const QUICK_LINKS: { label: string; href: string }[] = [
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { IndiaFlag, LogoMark } from "@/components/landing/marks";
+
+const LANDING_LINKS = [
+  { label: "Product", href: "#product" },
+  { label: "How it works", href: "#how-it-works" },
+  { label: "What we check", href: "#what-we-check" },
+  { label: "Repository", href: "/repository" },
+  { label: "GitHub", href: "https://github.com/kvm404/ocr-sih26" },
+];
+
+const APP_LINKS = [
   { label: "Home", href: "/" },
-  { label: "Scan a Pack", href: "/scan" },
+  { label: "Inspection", href: "/scan" },
   { label: "Dashboard", href: "/dashboard" },
   { label: "Repository", href: "/repository" },
+  { label: "Settings", href: "/settings" },
+  { label: "GitHub", href: "https://github.com/kvm404/ocr-sih26" },
 ];
 
 export default function Footer() {
+  const pathname = usePathname();
+  const links = pathname === "/" ? LANDING_LINKS : APP_LINKS;
+
   return (
-    <footer className="no-print bg-slate-900 text-slate-300">
-      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-12 sm:px-6 md:grid-cols-3 lg:px-8">
-        {/* About */}
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-white">
-              <Scale className="h-5 w-5" aria-hidden="true" />
+    <footer className="no-print border-t border-slate-200 bg-white">
+      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+        <Link href="/" className="flex items-center gap-2.5">
+          <LogoMark className="h-8 w-8" />
+          <span className="leading-tight">
+            <span className="block text-[1.05rem] font-extrabold tracking-tight text-slate-900">
+              NyayaPack
             </span>
-            <span className="text-lg font-bold text-white">NyayaPack</span>
-          </div>
-          <p className="mt-4 text-sm leading-relaxed text-slate-400">
-            Built for the Ministry of Consumer Affairs, Food &amp; Public
-            Distribution — Department of Consumer Affairs (DoCA).
-          </p>
-          <ul className="mt-4 space-y-1.5 text-sm text-slate-400">
-            <li>Legal Metrology Act, 2009</li>
-            <li>Legal Metrology (Packaged Commodities) Rules, 2011</li>
-            <li>Problem Statement SIH 26034</li>
-          </ul>
-        </div>
+            <span className="block text-xs font-medium text-slate-500">
+              see. verify. ensure.
+            </span>
+          </span>
+        </Link>
 
-        {/* Quick links */}
-        <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-white">
-            Quick Links
-          </h3>
-          <ul className="mt-4 space-y-2.5">
-            {QUICK_LINKS.map((link) => (
-              <li key={link.href + link.label}>
-                <Link
-                  href={link.href}
-                  className="text-sm text-slate-400 transition-colors hover:text-white"
-                >
-                  {link.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
+        <nav
+          className="flex flex-wrap items-center gap-x-6 gap-y-2"
+          aria-label="Footer"
+        >
+          {links.map((item) => (
+            <Link
+              key={item.href + item.label}
+              href={item.href}
+              className="text-sm font-medium text-slate-600 hover:text-slate-900"
+              {...(item.href.startsWith("http")
+                ? {
+                    target: "_blank",
+                    rel: "noreferrer",
+                    "aria-label": "NyayaPack on GitHub, opens in a new window",
+                  }
+                : {})}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
 
-        {/* Contact */}
-        <div>
-          <h3 className="text-sm font-semibold uppercase tracking-wider text-white">
-            Contact
-          </h3>
-          <ul className="mt-4 space-y-3 text-sm text-slate-400">
-            <li className="flex items-start gap-2.5">
-              <Phone
-                className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
-                aria-hidden="true"
-              />
-              <span>
-                DoCA National Consumer Helpline
-                <br />
-                <span className="font-medium text-slate-200">
-                  1800-11-4000 / 1915
-                </span>
-              </span>
-            </li>
-            <li className="flex items-start gap-2.5">
-              <Mail
-                className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
-                aria-hidden="true"
-              />
-              <span>consumersupport-doca@gov.in</span>
-            </li>
-            <li className="flex items-start gap-2.5">
-              <MapPin
-                className="mt-0.5 h-4 w-4 shrink-0 text-slate-500"
-                aria-hidden="true"
-              />
-              <span>
-                Legal Metrology Division, Krishi Bhawan,
-                <br />
-                New Delhi — 110001
-              </span>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <div className="border-t border-slate-800">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-2 px-4 py-5 text-center text-xs text-slate-500 sm:flex-row sm:px-6 sm:text-left lg:px-8">
-          <p>Prototype for SIH 2026 • Team Demo • Not for enforcement use</p>
-          <p>NyayaPack • SIH 26034 • DoCA</p>
-        </div>
+        <p className="flex items-center gap-2 text-sm text-slate-500">
+          Made for Bharat
+          <IndiaFlag className="h-3.5 w-5 rounded-[1px] ring-1 ring-slate-200" />
+          <span className="text-slate-600">SIH 2026</span>
+        </p>
       </div>
     </footer>
   );

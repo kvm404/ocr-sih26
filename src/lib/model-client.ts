@@ -32,6 +32,7 @@ import {
   type ExtractionResult,
 } from "./observations";
 import { mergePhotoExtractions } from "./package-analysis";
+import { errorDetail, log } from "./log";
 
 export type { ModelConfig } from "./model-config";
 
@@ -190,58 +191,159 @@ async function fetchWithTimeout(
 }
 
 function connectionFailed(endpoint: string, cause: unknown): ModelClientError {
-  void cause;
+  const detail = errorDetail(cause);
+  log.error("model", "connection_failed", `Cannot reach ${endpoint}`, {
+    code: "CONNECTION_FAILED",
+    data: { endpoint, cause: detail.message, name: detail.name },
+  });
   return new ModelClientError(
     "CONNECTION_FAILED",
-    `Cannot reach the model server at ${endpoint}. Is LM Studio running with the local server enabled (default http://localhost:1234/v1)?`,
+    "Can't reach the vision model. Start LM Studio with the local server enabled, then try again.",
     { endpoint },
   );
 }
 
 function timeoutError(endpoint: string, timeoutMs: number): ModelClientError {
+  log.error("model", "timeout", `No response from ${endpoint} within ${timeoutMs}ms`, {
+    code: "TIMEOUT",
+    durationMs: timeoutMs,
+    data: { endpoint },
+  });
   return new ModelClientError(
     "TIMEOUT",
-    `The model server at ${endpoint} did not respond within ${Math.round(timeoutMs / 1000)}s. The vision model may still be loading — retry once it is ready.`,
+    "The vision model did not respond in time. It may still be loading in LM Studio. Try again once it is ready.",
     { endpoint },
   );
 }
 
+/** Pull a short server phrase from an HTTP body. Never returns raw JSON. */
+function extractHttpErrorText(raw: string): string | null {
+  const text = raw.trim();
+  if (!text) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      const rec = parsed as Record<string, unknown>;
+      const err = rec.error;
+      if (typeof err === "string" && err.trim()) return err.trim();
+      if (err && typeof err === "object") {
+        const nested = (err as { message?: unknown }).message;
+        if (typeof nested === "string" && nested.trim()) return nested.trim();
+      }
+      if (typeof rec.message === "string" && rec.message.trim()) return rec.message.trim();
+    }
+  } catch {
+    // not JSON
+  }
+  if (text.startsWith("{") || text.startsWith("[")) return null;
+  return text.slice(0, 160);
+}
+
 async function throwForStatus(res: Response, endpoint: string): Promise<never> {
   const status = res.status;
-  let detail = "";
+  let raw = "";
   try {
-    const text = await res.text();
-    detail = text.slice(0, 300).trim();
+    raw = (await res.text()).slice(0, 400).trim();
   } catch {
-    detail = "";
+    raw = "";
   }
-  const suffix = detail ? ` Server said: ${detail}` : "";
+  const parsed = extractHttpErrorText(raw);
+  log.error("model", "http_error", `HTTP ${status} from ${endpoint}`, {
+    code: String(status),
+    data: { endpoint, status, detail: parsed ?? raw.slice(0, 200) },
+  });
   if (status === 401 || status === 403) {
     throw new ModelClientError(
       "UNAUTHORIZED",
-      `The model server rejected the request (HTTP ${status}). Check the API key in Settings — local LM Studio usually needs no key.${suffix}`,
+      "The model server rejected the request. Check the API key in Settings. Local LM Studio usually needs none.",
       { status, endpoint },
     );
   }
   if (status === 404) {
     throw new ModelClientError(
       "NOT_FOUND",
-      `The model endpoint was not found (HTTP 404 at ${endpoint}). Check the base URL in Settings — it should look like http://localhost:1234/v1.${suffix}`,
+      "The model endpoint was not found. Check the base URL in Settings.",
+      { status, endpoint },
+    );
+  }
+  if (status === 502 || status === 503) {
+    throw new ModelClientError(
+      "CONNECTION_FAILED",
+      "Can't reach the vision model. Start LM Studio with the local server enabled, then try again.",
       { status, endpoint },
     );
   }
   if (status >= 500) {
     throw new ModelClientError(
       "SERVER_ERROR",
-      `The model server failed with HTTP ${status}.${suffix}`,
+      "The vision model failed on the server. Try again, or check LM Studio.",
       { status, endpoint },
     );
   }
   throw new ModelClientError(
     "MODEL_NOT_FOUND",
-    `The model request failed with HTTP ${status}.${suffix}`,
+    "The model request failed. Check the model id in Settings.",
     { status, endpoint },
   );
+}
+
+/** Short copy for inspect/settings banners. Raw HTTP bodies stay in the session log. */
+export function describeModelError(err: unknown): {
+  title: string;
+  detail: string;
+  offerSettings: boolean;
+} {
+  if (err instanceof ModelClientError) {
+    switch (err.code) {
+      case "CONNECTION_FAILED":
+        return {
+          title: "Can't reach the vision model",
+          detail: "Start LM Studio with the local server enabled, then try again.",
+          offerSettings: true,
+        };
+      case "TIMEOUT":
+        return {
+          title: "The vision model timed out",
+          detail: "It may still be loading. Wait until it is ready in LM Studio, then try again.",
+          offerSettings: true,
+        };
+      case "UNAUTHORIZED":
+        return {
+          title: "The model server rejected the request",
+          detail: "Check the API key in Settings. Local LM Studio usually needs none.",
+          offerSettings: true,
+        };
+      case "NOT_FOUND":
+      case "MODEL_NOT_FOUND":
+        return {
+          title: "The model was not found",
+          detail: "Check the base URL and model id in Settings.",
+          offerSettings: true,
+        };
+      case "BAD_REQUEST":
+        return {
+          title: "The photographs could not be sent",
+          detail: err.message,
+          offerSettings: false,
+        };
+      case "SERVER_ERROR":
+        return {
+          title: "The vision model failed",
+          detail: "Try again in a moment. If it keeps failing, check LM Studio.",
+          offerSettings: true,
+        };
+      case "BAD_RESPONSE":
+        return {
+          title: "The vision model returned nothing usable",
+          detail: "No report was created. Try again, or check the model in Settings.",
+          offerSettings: true,
+        };
+    }
+  }
+  if (err instanceof Error && err.message.trim()) {
+    return { title: "Analysis failed", detail: err.message, offerSettings: false };
+  }
+  return { title: "Analysis failed", detail: "No report was created.", offerSettings: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +393,8 @@ export async function testConnection(opts?: { timeoutMs?: number }): Promise<Tes
   const timeoutMs = opts?.timeoutMs ?? TEST_CONNECTION_TIMEOUT_MS;
   const route = resolveModelEndpoint(baseUrl, "models");
   const endpoint = route.display;
+  const started = Date.now();
+  log.info("model", "test_start", `GET ${endpoint}`, { data: { model } });
   let res: Response;
   try {
     res = await fetchWithTimeout(
@@ -309,14 +413,14 @@ export async function testConnection(opts?: { timeoutMs?: number }): Promise<Tes
   } catch {
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned an invalid response at ${endpoint}. Expected OpenAI-compatible JSON.`,
+      "The model server returned an invalid response. Expected OpenAI-compatible JSON.",
       { status: res.status, endpoint },
     );
   }
   if (json === null || typeof json !== "object") {
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned an invalid response at ${endpoint}. Expected OpenAI-compatible JSON.`,
+      "The model server returned an invalid response. Expected OpenAI-compatible JSON.",
       { status: res.status, endpoint },
     );
   }
@@ -326,12 +430,20 @@ export async function testConnection(opts?: { timeoutMs?: number }): Promise<Tes
         .map((m) => (m !== null && typeof m === "object" ? (m as { id?: unknown }).id : undefined))
         .filter((id): id is string => typeof id === "string")
     : [];
-  return {
-    ok: true,
+  const result = {
+    ok: true as const,
     baseUrl: normalizeBaseUrl(baseUrl),
     models,
     configuredModelFound: models.length > 0 ? models.includes(model) : null,
   };
+  log.info("model", "test_ok", `Connected to ${result.baseUrl}`, {
+    durationMs: Date.now() - started,
+    data: {
+      modelCount: models.length,
+      configuredModelFound: result.configuredModelFound,
+    },
+  });
+  return result;
 }
 
 /**
@@ -386,6 +498,10 @@ export async function analyzePhotos(
   const timeoutMs = opts?.timeoutMs ?? ANALYZE_PHOTOS_TIMEOUT_MS;
   const route = resolveModelEndpoint(baseUrl, "chat/completions");
   const endpoint = route.display;
+  const started = Date.now();
+  log.info("model", "analyze_start", `POST ${endpoint}`, {
+    data: { model, photoCount: photos.length, photoIds: photos.map((p) => p.id) },
+  });
   const body = {
     model,
     messages: [
@@ -433,16 +549,24 @@ export async function analyzePhotos(
   try {
     json = await res.json();
   } catch {
+    log.error("model", "bad_response", "Invalid JSON from chat/completions", {
+      code: "BAD_RESPONSE",
+      data: { endpoint, status: res.status },
+    });
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned invalid JSON at ${endpoint}. No report was created.`,
+      "The model server returned invalid JSON. No report was created.",
       { status: res.status, endpoint },
     );
   }
   if (json === null || typeof json !== "object" || !("choices" in json)) {
+    log.error("model", "bad_response", "Response missing choices", {
+      code: "BAD_RESPONSE",
+      data: { endpoint, status: res.status },
+    });
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned an unexpected response shape at ${endpoint} (missing "choices"). No report was created.`,
+      "The model server returned an unexpected response. No report was created.",
       { status: res.status, endpoint },
     );
   }
@@ -450,10 +574,14 @@ export async function analyzePhotos(
   if (!Array.isArray(choices) || choices.length === 0) {
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned no completion choices at ${endpoint}. No report was created.`,
+      "The model server returned no completion. No report was created.",
       { status: res.status, endpoint },
     );
   }
+  log.info("model", "analyze_ok", "Model returned completion choices", {
+    durationMs: Date.now() - started,
+    data: { photoCount: photos.length, choiceCount: choices.length, model },
+  });
   return json;
 }
 
@@ -479,6 +607,10 @@ export async function analyzePackage(
   const hint = resolveCategoryHint(categoryHint);
   const perPhoto: ExtractionResult[] = [];
   const total = photos.length;
+  const started = Date.now();
+  log.info("model", "package_start", `Analyzing ${total} photograph(s)`, {
+    data: { photoCount: total, hint },
+  });
   for (let i = 0; i < total; i++) {
     if (opts?.signal?.aborted) {
       throw new ModelClientError("TIMEOUT", "The analysis was cancelled.");
@@ -499,10 +631,19 @@ export async function analyzePackage(
     perPhoto.push(parsed);
     opts?.onProgress?.(i + 1, total);
   }
-  return mergePhotoExtractions(
+  const merged = mergePhotoExtractions(
     perPhoto,
     photos.map((photo) => photo.id),
   );
+  log.info("model", "package_ok", "Merged per-photo extractions", {
+    durationMs: Date.now() - started,
+    data: {
+      photoCount: total,
+      observationCount: merged.observations.length,
+      unattested: merged.unattestedPhotoIds.length,
+    },
+  });
+  return merged;
 }
 
 /** Result of a free-form vision chat used by the Settings test bench. */
@@ -554,6 +695,7 @@ export async function chatVisionText(
   const body = { model, messages, temperature: 0.2, max_tokens: opts?.maxTokens ?? 800 };
 
   const started = Date.now();
+  log.info("model", "bench_start", `POST ${endpoint}`, { data: { model } });
   let res: Response;
   try {
     res = await fetchWithTimeout(
@@ -577,7 +719,7 @@ export async function chatVisionText(
   } catch {
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned invalid JSON at ${endpoint}.`,
+      "The model server returned invalid JSON.",
       { status: res.status, endpoint },
     );
   }
@@ -589,14 +731,19 @@ export async function chatVisionText(
   if (typeof content !== "string" || !content.trim()) {
     throw new ModelClientError(
       "BAD_RESPONSE",
-      `The model server returned no reply text at ${endpoint}.`,
+      "The model server returned no reply text.",
       { status: res.status, endpoint },
     );
   }
   const served = (json as { model?: unknown }).model;
+  const elapsedMs = Date.now() - started;
+  log.info("model", "bench_ok", "Vision bench returned text", {
+    durationMs: elapsedMs,
+    data: { model: typeof served === "string" ? served : model, chars: content.trim().length },
+  });
   return {
     text: content.trim(),
-    elapsedMs: Date.now() - started,
+    elapsedMs,
     model: typeof served === "string" ? served : undefined,
   };
 }

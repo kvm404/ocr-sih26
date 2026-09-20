@@ -29,6 +29,7 @@ import { FIELD_MAP } from "@/lib/observations";
 import { loadReview, saveReview, type ReviewPayload } from "@/lib/review-store";
 import {
   createPhotoObjectUrl,
+  describeStoreError,
   getInspection,
   listLegacyReports,
   saveInspection,
@@ -36,10 +37,11 @@ import {
   type LegacyReportRef,
 } from "@/lib/store";
 import type { ImportStatus, ObservedField } from "@/lib/types";
+import { Notice, type NoticeCopy } from "@/components/Notice";
 
 type Phase =
   | { kind: "loading" }
-  | { kind: "error"; message: string }
+  | { kind: "error"; notice: NoticeCopy }
   | { kind: "not-found" }
   | { kind: "legacy"; entry: LegacyReportRef }
   | { kind: "ready" };
@@ -200,7 +202,7 @@ export default function ReportPage() {
     Pick<ReviewPayload, "photoFaces" | "samePackage" | "mismatchNote">
   >({ photoFaces: [], samePackage: null, mismatchNote: null });
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({});
-  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<NoticeCopy | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [exportingDocx, setExportingDocx] = useState(false);
 
@@ -242,10 +244,7 @@ export default function ReportPage() {
         if (cancelled) return;
         setPhase({
           kind: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "Browser storage is unavailable, so this inspection cannot be opened.",
+          notice: describeStoreError(error),
         });
       }
     }
@@ -348,9 +347,10 @@ export default function ReportPage() {
           `Accept or reject each suspected violation (${undecided} undecided).`,
         );
       }
-      setConfirmError(
-        `Cannot confirm yet: ${reasons.join(" ")} Nothing was marked final.`,
-      );
+      setConfirmError({
+        title: "Cannot confirm yet",
+        detail: `${reasons.join(" ")} Nothing was marked final.`,
+      });
       return;
     }
     setConfirming(true);
@@ -362,11 +362,10 @@ export default function ReportPage() {
       setInspection(saved);
       setOverlay(nextOverlay);
     } catch (error) {
-      setConfirmError(
-        error instanceof Error
-          ? `Could not confirm: ${error.message}`
-          : "Could not confirm this report. Nothing was marked final.",
-      );
+      setConfirmError({
+        title: "Confirmation was not saved",
+        detail: describeStoreError(error).detail,
+      });
     } finally {
       setConfirming(false);
     }
@@ -415,13 +414,15 @@ export default function ReportPage() {
 
   if (phase.kind === "error") {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-16 text-center sm:px-6">
+      <div className="mx-auto max-w-2xl px-4 py-16 sm:px-6">
         <h1 className="text-xl font-bold text-slate-900">Report cannot be opened</h1>
-        <p className="mt-2 text-sm text-slate-600">{phase.message}</p>
+        <div className="mt-4">
+          <Notice {...phase.notice} />
+        </div>
         <div className="mt-6">
           <Link
             href="/scan"
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E40AF]"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to scan
           </Link>
@@ -440,7 +441,7 @@ export default function ReportPage() {
         <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
           <Link
             href="/scan"
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E40AF]"
           >
             <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Back to scan
           </Link>
@@ -474,7 +475,7 @@ export default function ReportPage() {
           </Link>
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
-          <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-inset ring-slate-300">
+          <span className="inline-flex items-center rounded-md bg-slate-100 px-3 py-1 text-xs font-bold text-slate-600 ring-1 ring-inset ring-slate-300">
             Older saved entry
           </span>
           <h1 className="mt-2 text-xl font-bold text-slate-900">{entry.productName}</h1>
@@ -583,7 +584,7 @@ export default function ReportPage() {
       {/* Identity */}
       <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center rounded-full bg-slate-800 px-3 py-1 text-xs font-bold text-white">
+          <span className="inline-flex items-center rounded-md bg-slate-800 px-3 py-1 text-xs font-bold text-white">
             {model.headline}
           </span>
           <span className="text-xs text-slate-500">Inspection aid — not legal certification</span>
@@ -685,7 +686,7 @@ export default function ReportPage() {
           <button
             type="button"
             onClick={downloadPdf}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800"
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E40AF]"
           >
             <Download className="h-4 w-4" aria-hidden="true" /> Download PDF{isDraft ? " (DRAFT)" : ""}
           </button>
@@ -736,11 +737,11 @@ export default function ReportPage() {
             </>
           )}
         </div>
-        {confirmError && (
-          <p role="alert" className="mt-2 text-sm text-red-700">
-            {confirmError}
-          </p>
-        )}
+        {confirmError ? (
+          <div className="mt-3">
+            <Notice {...confirmError} />
+          </div>
+        ) : null}
       </div>
 
       {/* Main grid */}
@@ -762,12 +763,12 @@ export default function ReportPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-slate-900">{declaration.label}</span>
                       {declaration.needsReview && (
-                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+                        <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
                           Needs review
                         </span>
                       )}
                       {declaration.corrected && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800 ring-1 ring-inset ring-blue-300">
+                        <span className="rounded-md bg-blue-100 px-2 py-0.5 text-[11px] font-bold text-blue-800 ring-1 ring-inset ring-blue-300">
                           Corrected by reviewer
                         </span>
                       )}
@@ -869,11 +870,11 @@ export default function ReportPage() {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-slate-900">{finding.label}</span>
-                      <span className="rounded-full bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-medium text-white">
+                      <span className="rounded-md bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-medium text-white">
                         {finding.legalCitation}
                       </span>
                       <span
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-bold ring-1 ring-inset ${
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-bold ring-1 ring-inset ${
                           finding.result === "no_issue_found"
                             ? "bg-green-100 text-green-800 ring-green-300"
                             : finding.decision === "accepted"
@@ -964,10 +965,10 @@ export default function ReportPage() {
                   >
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="font-semibold text-slate-900">{item.label}</span>
-                      <span className="rounded-full bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-medium text-white">
+                      <span className="rounded-md bg-slate-800 px-2 py-0.5 font-mono text-[11px] font-medium text-white">
                         {item.legalCitation}
                       </span>
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+                      <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
                         Not assessed
                       </span>
                     </div>

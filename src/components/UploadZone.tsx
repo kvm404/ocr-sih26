@@ -1,7 +1,23 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { FileImage, Upload, X, type LucideIcon } from "lucide-react";
+import {
+  Camera,
+  Check,
+  ClipboardCheck,
+  ImagePlus,
+  ScanSearch,
+  Upload,
+  X,
+  type LucideIcon,
+} from "lucide-react";
+import CameraCapture from "@/components/CameraCapture";
+import {
+  defaultCameraFacing,
+  liveCameraAvailable,
+  type CameraFacing,
+} from "@/lib/camera";
+import { log } from "@/lib/log";
 
 export interface UploadZonePhoto {
   photoId: string;
@@ -21,10 +37,10 @@ export interface UploadZoneProps {
 }
 
 const STEPS: { label: string; icon: LucideIcon }[] = [
-  { label: "Upload", icon: Upload },
-  { label: "Analyze", icon: FileImage },
-  { label: "Review", icon: FileImage },
-  { label: "Confirm", icon: FileImage },
+  { label: "Photos", icon: Camera },
+  { label: "Analyze", icon: ScanSearch },
+  { label: "Review", icon: ClipboardCheck },
+  { label: "Confirm", icon: Check },
 ];
 
 const CATEGORY_OPTIONS: { value: string; label: string }[] = [
@@ -44,18 +60,42 @@ export default function UploadZone({
   currentStep,
   disabled = false,
 }: UploadZoneProps) {
-  const inputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
+  const galleryInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>("user");
 
-  function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const images = Array.from(files).filter((f) => f.type.startsWith("image/"));
-    if (images.length > 0) onFilesSelect(images);
+  function handleFiles(files: FileList | File[] | null) {
+    if (!files) return;
+    const list = Array.from(files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (list.length > 0) onFilesSelect(list);
+  }
+
+  function openDeviceCamera() {
+    setCameraOpen(false);
+    cameraInputRef.current?.click();
+  }
+
+  function openTakePhoto() {
+    if (disabled) return;
+    if (liveCameraAvailable()) {
+      const facing = defaultCameraFacing();
+      setCameraFacing(facing);
+      setCameraOpen(true);
+      log.info("camera", "open", "Take photo opened live camera", {
+        data: { facing },
+      });
+      return;
+    }
+    log.info("camera", "file_fallback", "No live camera; opening file picker");
+    openDeviceCamera();
   }
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-      {/* Progress steps */}
       <ol className="mb-5 flex items-start" aria-label="Inspection progress">
         {STEPS.map((step, i) => {
           const done = i < currentStep;
@@ -67,21 +107,21 @@ export default function UploadZone({
               className={`flex items-center ${i < STEPS.length - 1 ? "flex-1" : ""}`}
               aria-current={active ? "step" : undefined}
             >
-              <div className="flex flex-col items-center gap-1.5">
+              <div className="flex flex-col items-center gap-1">
                 <span
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border-2 transition-colors ${
+                  className={`flex h-9 w-9 items-center justify-center rounded-xl border-2 ${
                     done
-                      ? "border-green-500 bg-green-500 text-white"
+                      ? "border-green-600 bg-green-600 text-white"
                       : active
-                        ? "animate-pulse border-blue-600 bg-blue-600 text-white"
+                        ? "border-blue-700 bg-blue-700 text-white"
                         : "border-slate-300 bg-white text-slate-400"
                   }`}
                 >
                   <Icon className="h-4 w-4" aria-hidden="true" />
                 </span>
                 <span
-                  className={`text-[11px] font-medium sm:text-xs ${
-                    done || active ? "text-slate-900" : "text-slate-400"
+                  className={`text-xs font-medium ${
+                    done || active ? "text-slate-900" : "text-slate-500"
                   }`}
                 >
                   {step.label}
@@ -89,8 +129,8 @@ export default function UploadZone({
               </div>
               {i < STEPS.length - 1 && (
                 <div
-                  className={`mx-1 mb-6 h-0.5 flex-1 rounded sm:mx-2 ${
-                    done ? "bg-green-500" : "bg-slate-200"
+                  className={`mx-1 mb-5 h-0.5 flex-1 rounded sm:mx-2 ${
+                    done ? "bg-green-600" : "bg-slate-200"
                   }`}
                   aria-hidden="true"
                 />
@@ -100,7 +140,6 @@ export default function UploadZone({
         })}
       </ol>
 
-      {/* Category select: manual choice wins over model inference (PRD stories 4-6). */}
       <div>
         <label
           htmlFor="category-hint"
@@ -113,7 +152,7 @@ export default function UploadZone({
           value={categoryHint}
           disabled={disabled}
           onChange={(e) => onCategoryHintChange(e.target.value)}
-          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 sm:w-72"
+          className="mt-1 min-h-11 w-full rounded-md border border-slate-300 px-3 py-2 text-base text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-60 sm:w-72 sm:text-sm"
         >
           {CATEGORY_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
@@ -121,26 +160,65 @@ export default function UploadZone({
             </option>
           ))}
         </select>
-        <p className="mt-1 text-xs text-slate-500">
-          Optional. Auto-detect lets the model suggest one; your choice overrides
-          the suggestion. The reviewer can still correct it before confirming.
+        <p className="mt-1 hidden text-xs text-slate-600 sm:block">
+          Optional. Auto-detect lets the model suggest one; your choice
+          overrides the suggestion. The reviewer can still correct it before
+          confirming.
         </p>
       </div>
 
-      {/* Dropzone: multiple photos of the same package. */}
+      <input
+        ref={cameraInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="sr-only"
+        disabled={disabled}
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={galleryInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="sr-only"
+        disabled={disabled}
+        onChange={(e) => {
+          handleFiles(e.target.files);
+          e.target.value = "";
+        }}
+      />
+
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={openTakePhoto}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          <Camera className="h-5 w-5" aria-hidden="true" />
+          Take photo
+        </button>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            if (!disabled) galleryInputRef.current?.click();
+          }}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <ImagePlus className="h-5 w-5" aria-hidden="true" />
+          Choose from gallery
+        </button>
+      </div>
+      <p className="mt-2 text-xs text-slate-600">
+        Front, back, and any side that shows declarations.
+      </p>
+
       <div
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        aria-disabled={disabled}
-        onClick={() => {
-          if (!disabled) inputRef.current?.click();
-        }}
-        onKeyDown={(e) => {
-          if ((e.key === "Enter" || e.key === " ") && !disabled) {
-            e.preventDefault();
-            inputRef.current?.click();
-          }
-        }}
         onDragOver={(e) => {
           e.preventDefault();
           if (!disabled) setDragActive(true);
@@ -151,82 +229,76 @@ export default function UploadZone({
           setDragActive(false);
           if (!disabled) handleFiles(e.dataTransfer.files);
         }}
-        className={`mt-4 flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors ${
+        className={`mt-4 hidden min-h-52 flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-12 text-center md:flex lg:min-h-64 lg:py-16 ${
           disabled
-            ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
+            ? "border-slate-200 bg-slate-50 opacity-60"
             : dragActive
               ? "border-blue-500 bg-blue-50"
-              : "border-slate-300 bg-slate-50 hover:border-blue-400 hover:bg-blue-50/50"
+              : "border-slate-300 bg-slate-50"
         }`}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          disabled={disabled}
-          onChange={(e) => {
-            handleFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
-        <span className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-blue-800">
           <Upload className="h-6 w-6" aria-hidden="true" />
         </span>
         <p className="text-sm font-semibold text-slate-900">
-          Drag &amp; drop package photos, or click to browse
+          Or drop package photos here
         </p>
-        <p className="text-xs text-slate-500">
-          Multiple images allowed — photograph the front, back, and sides of one
-          package
-        </p>
+        <p className="text-xs text-slate-600">JPEG, PNG, or HEIC from a phone</p>
       </div>
 
-      {/* Previews with remove buttons. */}
-      {photos.length > 0 && (
+      {photos.length > 0 ? (
         <div className="mt-4">
-          <p className="text-sm font-medium text-slate-700">
-            {photos.length} photo{photos.length === 1 ? "" : "s"} in this inspection
+          <p className="text-sm font-medium text-slate-800">
+            {photos.length} photo{photos.length === 1 ? "" : "s"} in this
+            inspection
           </p>
           <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {photos.map((photo) => (
-              <li
-                key={photo.photoId}
-                className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
-              >
-                <img
-                  src={photo.url}
-                  alt={photo.name}
-                  className="h-28 w-full object-cover"
-                />
-                <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-                  <span className="flex min-w-0 items-center gap-1 text-xs text-slate-600">
-                    <FileImage
-                      className="h-3.5 w-3.5 shrink-0 text-slate-400"
-                      aria-hidden="true"
-                    />
-                    <span className="truncate">
-                      {photo.name}
-                      {photo.face && photo.face !== "unknown" ? ` · ${photo.face}` : ""}
-                    </span>
-                  </span>
+            {photos.map((photo, index) => {
+              const label =
+                photo.face && photo.face !== "unknown"
+                  ? photo.face
+                  : `Photo ${index + 1}`;
+              return (
+                <li
+                  key={photo.photoId}
+                  className="relative overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
+                >
+                  <img
+                    src={photo.url}
+                    alt={label}
+                    className="aspect-[4/3] h-auto w-full object-cover"
+                  />
                   <button
                     type="button"
                     disabled={disabled}
                     onClick={() => onRemovePhoto(photo.photoId)}
-                    aria-label={`Remove ${photo.name}`}
-                    className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-slate-300 bg-white px-1.5 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+                    aria-label={`Remove ${label}`}
+                    className="absolute top-2 right-2 inline-flex min-h-11 min-w-11 items-center justify-center rounded-xl bg-black/65 text-white hover:bg-black/80 disabled:opacity-60"
                   >
-                    <X className="h-3.5 w-3.5" aria-hidden="true" />
-                    Remove
+                    <X className="h-4 w-4" aria-hidden="true" />
                   </button>
-                </div>
-              </li>
-            ))}
+                  <p className="truncate px-2 py-1.5 text-xs text-slate-600">
+                    {label}
+                  </p>
+                </li>
+              );
+            })}
           </ul>
         </div>
+      ) : (
+        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-3 text-sm text-slate-600 md:hidden">
+          Nothing is saved until you take or add a photograph.
+        </p>
       )}
+
+      {cameraOpen ? (
+        <CameraCapture
+          initialFacing={cameraFacing}
+          onClose={() => setCameraOpen(false)}
+          onCapture={(file) => handleFiles([file])}
+          onUseDeviceCamera={openDeviceCamera}
+        />
+      ) : null}
     </div>
   );
 }

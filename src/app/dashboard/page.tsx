@@ -6,26 +6,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
-  Eye,
   Loader2,
   ScanLine,
   Search,
-  ShieldCheck,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import StatCard from "@/components/StatCard";
+import { Notice, type NoticeCopy } from "@/components/Notice";
 import {
   headlineFromLegacyStatus,
   headlineFromResults,
@@ -35,14 +21,14 @@ import {
   type RealHeadline,
 } from "@/lib/headlines";
 import {
+  deleteEmptyDrafts,
+  describeStoreError,
   isStorageAvailable,
   listInspections,
   listLegacyReports,
 } from "@/lib/store";
 import type { InspectionRecord, LegacyReportRef } from "@/lib/store";
 import type { ReportHeadline } from "@/lib/types";
-
-const PIE_COLORS = ["#16a34a", "#dc2626", "#d97706"];
 
 type UnifiedEntry = {
   key: string;
@@ -209,6 +195,42 @@ function headlineBadge(headline: ReportHeadline): string {
   }
 }
 
+function headlineLabel(headline: ReportHeadline): string {
+  switch (headline) {
+    case "suspected violation":
+      return "Suspected violation";
+    case "no issue found in assessed checks":
+      return "No issue found";
+    case "insufficient evidence":
+      return "Insufficient evidence";
+  }
+}
+
+function categoryLabel(category: string): string {
+  switch (category) {
+    case "auto":
+    case "unknown":
+    case "":
+      return "Not set";
+    case "food-beverages":
+      return "Food and beverages";
+    case "personal-care":
+      return "Personal care";
+    case "household":
+      return "Household products";
+    case "other":
+      return "Other";
+    case "legacy":
+      return "Older record";
+    default:
+      return category;
+  }
+}
+
+function isDraftEntry(entry: UnifiedEntry): boolean {
+  return entry.isDraft || entry.statusNote === "draft";
+}
+
 function formatDate(value: string): string {
   if (!value) return "date unknown";
   const d = new Date(value);
@@ -230,7 +252,7 @@ export default function DashboardPage() {
   const [legacy, setLegacy] = useState<LegacyReportRef[]>([]);
   const [realHeadlines, setRealHeadlines] = useState<Record<string, RealHeadline>>({});
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<NoticeCopy | null>(null);
   const [query, setQuery] = useState("");
 
   useEffect(() => {
@@ -242,13 +264,17 @@ export default function DashboardPage() {
             setInspections([]);
             setRealHeadlines({});
             setLegacy(listLegacyReports());
-            setLoadError(
-              "Browser storage (IndexedDB) is unavailable, so saved inspections cannot be listed on this device.",
-            );
+            setLoadError({
+              title: "Browser storage is unavailable",
+              detail: "Saved inspections cannot be listed in this browser.",
+            });
           }
           return;
         }
-        const records = await listInspections();
+        await deleteEmptyDrafts();
+        const records = (await listInspections()).filter(
+          (record) => record.photos.length > 0,
+        );
         // Real per-record headlines from reviewer state (sync localStorage
         // reads resolved here so the loading state below covers them).
         const headlines: Record<string, RealHeadline> = {};
@@ -275,9 +301,7 @@ export default function DashboardPage() {
           } catch {
             setLegacy([]);
           }
-          setLoadError(
-            err instanceof Error ? err.message : "Could not list saved inspections.",
-          );
+          setLoadError(describeStoreError(err));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -309,12 +333,28 @@ export default function DashboardPage() {
     return { total, suspected, noIssue, insufficient };
   }, [inspectionEntries]);
 
-  const pieData = useMemo(
-    () => [
-      { name: "No issue found", value: stats.noIssue },
-      { name: "Suspected violation", value: stats.suspected },
-      { name: "Insufficient evidence", value: stats.insufficient },
-    ],
+  const mixRows = useMemo(
+    () =>
+      [
+        {
+          key: "insufficient" as const,
+          label: "Insufficient evidence",
+          value: stats.insufficient,
+          bar: "bg-amber-500",
+        },
+        {
+          key: "noIssue" as const,
+          label: "No issue found",
+          value: stats.noIssue,
+          bar: "bg-green-600",
+        },
+        {
+          key: "suspected" as const,
+          label: "Suspected violation",
+          value: stats.suspected,
+          bar: "bg-red-600",
+        },
+      ],
     [stats],
   );
 
@@ -334,48 +374,40 @@ export default function DashboardPage() {
   const recent = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
-      ? inspectionEntries.filter(
-          (e) =>
-            e.title.toLowerCase().includes(q) ||
-            e.subtitle.toLowerCase().includes(q) ||
-            e.category.toLowerCase().includes(q) ||
-            e.reportId.toLowerCase().includes(q) ||
-            e.headline.toLowerCase().includes(q),
-        )
+      ? inspectionEntries.filter((e) => {
+          const hay = [
+            e.title,
+            e.subtitle,
+            e.category,
+            categoryLabel(e.category),
+            e.reportId,
+            e.headline,
+            headlineLabel(e.headline),
+          ]
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(q);
+        })
       : inspectionEntries;
     return [...filtered]
       .sort((a, b) => createdAtTime(b.createdAt) - createdAtTime(a.createdAt))
       .slice(0, 8);
   }, [inspectionEntries, query]);
 
-  const today = new Date().toLocaleDateString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Enforcement Dashboard
-          </h1>
-          <p className="text-sm text-gray-500">
-            Department of Consumer Affairs (DoCA) — Legal Metrology · real inspections only
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 font-semibold text-blue-800">
-            <ShieldCheck className="h-4 w-4" /> Inspector Login
-          </span>
-          <span className="text-gray-500">{today}</span>
-        </div>
+    <div className="mx-auto max-w-6xl space-y-5 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
+      <div>
+        <h1 className="text-2xl font-extrabold tracking-[-0.03em] text-slate-950 sm:text-3xl">
+          Dashboard
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Inspections saved on this device.
+        </p>
       </div>
 
       {loading ? (
         <div
-          className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white p-4 text-sm text-gray-500 shadow-sm"
+          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm"
           role="status"
           aria-live="polite"
         >
@@ -384,246 +416,286 @@ export default function DashboardPage() {
         </div>
       ) : null}
 
-      {loadError && !loading ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">
-          {loadError}
-        </div>
-      ) : null}
+      {loadError && !loading ? <Notice {...loadError} /> : null}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          title="Total inspections"
+          title="Inspections"
           value={loading ? "…" : stats.total}
-          subtitle="real saved records"
-          icon={<ScanLine className="h-5 w-5" />}
+          subtitle="On this device"
+          icon={<ScanLine className="h-4 w-4" aria-hidden="true" />}
           tone="blue"
         />
         <StatCard
           title="Suspected violations"
           value={loading ? "…" : stats.suspected}
-          subtitle="awaiting reviewer decision"
-          icon={<AlertTriangle className="h-5 w-5" />}
+          subtitle="From reviewed checks"
+          icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
           tone="red"
         />
         <StatCard
           title="No issue found"
           value={loading ? "…" : stats.noIssue}
-          subtitle="in assessed checks"
-          icon={<CheckCircle2 className="h-5 w-5" />}
+          subtitle="In assessed checks"
+          icon={<CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
           tone="green"
         />
         <StatCard
           title="Insufficient evidence"
           value={loading ? "…" : stats.insufficient}
-          subtitle="not assessed — needs review"
-          icon={<Clock className="h-5 w-5" />}
+          subtitle="Not assessed yet"
+          icon={<Clock className="h-4 w-4" aria-hidden="true" />}
           tone="amber"
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="mb-2 font-semibold text-gray-900">
-            Suspected violations by check
-          </h2>
-          {loading ? (
-            <p className="flex items-center gap-2 py-10 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading…
-            </p>
-          ) : violationsByType.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={violationsByType}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" fontSize={12} interval={0} angle={-12} dy={8} height={60} />
-                <YAxis fontSize={12} allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="value" fill="#dc2626" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="py-10 text-center text-sm text-gray-500">
-              No suspected violations recorded in saved inspections yet.
-            </p>
-          )}
+      {!loading && stats.total > 0 ? (
+        <div
+          className={`grid grid-cols-1 gap-4 ${
+            violationsByType.length > 0 ? "lg:grid-cols-2" : ""
+          }`}
+        >
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-900">Headline mix</h2>
+            <ul className="mt-3 space-y-3">
+              {mixRows.map((row) => {
+                const pct =
+                  stats.total === 0
+                    ? 0
+                    : Math.round((row.value / stats.total) * 100);
+                return (
+                  <li key={row.key}>
+                    <div className="flex items-baseline justify-between gap-3 text-sm">
+                      <span className="text-slate-700">{row.label}</span>
+                      <span className="tabular-nums font-medium text-slate-900">
+                        {row.value}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-2 overflow-hidden rounded-md bg-slate-100">
+                      <div
+                        className={`h-2 rounded-md ${row.bar}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+          {violationsByType.length > 0 ? (
+            <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-sm font-semibold text-slate-900">
+                Suspected violations by check
+              </h2>
+              <ul className="mt-3 divide-y divide-slate-100">
+                {violationsByType.map((row) => (
+                  <li
+                    key={row.name}
+                    className="flex items-center justify-between gap-3 py-2 text-sm"
+                  >
+                    <span className="min-w-0 text-slate-700">{row.name}</span>
+                    <span className="tabular-nums font-medium text-slate-900">
+                      {row.value}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </div>
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="mb-2 font-semibold text-gray-900">
-            Headline split
-          </h2>
-          {loading ? (
-            <p className="flex items-center gap-2 py-10 text-sm text-gray-500">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading…
-            </p>
-          ) : stats.total > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  dataKey="value"
-                  nameKey="name"
-                  outerRadius={90}
-                  label
-                >
-                  {pieData.map((entry, i) => (
-                    <Cell
-                      key={entry.name}
-                      fill={PIE_COLORS[i % PIE_COLORS.length]}
-                    />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="py-10 text-center text-sm text-gray-500">
-              Nothing scanned yet — headlines will appear here after the first inspection.
-            </p>
-          )}
-        </div>
-      </div>
+      ) : null}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-semibold text-gray-900">Recent Inspections</h2>
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Filter by name, ID, or category…"
-              className="rounded-lg border border-gray-300 py-1.5 pl-8 pr-3 text-sm focus:border-blue-500 focus:outline-none"
-            />
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">
+              Recent inspections
+            </h2>
+            {!loading && inspectionEntries.length > recent.length ? (
+              <p className="mt-0.5 text-xs text-slate-600">
+                Showing {recent.length} of {inspectionEntries.length}.{" "}
+                <Link
+                  href="/repository"
+                  className="font-medium text-blue-800 underline-offset-2 hover:underline"
+                >
+                  Open repository
+                </Link>
+              </p>
+            ) : null}
           </div>
+          {inspectionEntries.length > 0 ? (
+            <div className="relative w-full sm:max-w-xs">
+              <Search
+                className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-500"
+                aria-hidden="true"
+              />
+              <label htmlFor="dashboard-filter" className="sr-only">
+                Filter inspections
+              </label>
+              <input
+                id="dashboard-filter"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter by id, category, or headline"
+                className="min-h-11 w-full rounded-lg border border-slate-300 py-2 pr-3 pl-9 text-sm text-slate-900 focus:border-blue-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+              />
+            </div>
+          ) : null}
         </div>
+
         {loading ? (
-          <p className="flex items-center gap-2 py-6 text-sm text-gray-500">
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Loading saved inspections…
+          <p className="mt-4 flex items-center gap-2 text-sm text-slate-600">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            Loading saved inspections…
           </p>
         ) : inspectionEntries.length === 0 ? (
           <div className="py-10 text-center">
-            <p className="font-medium text-gray-700">No inspections yet</p>
-            <p className="mx-auto mt-1 max-w-md text-sm text-gray-500">
-              Nothing has been scanned on this laptop. Photograph a package to create the first
-              real inspection — no sample data is shown here.
+            <p className="font-medium text-slate-800">No inspections yet</p>
+            <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">
+              Photograph a package to create the first record. Empty visits are
+              not saved.
             </p>
             <Link
               href="/scan"
-              className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+              className="mt-4 inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-[#1D4ED8] px-4 text-sm font-semibold text-white hover:bg-[#1E40AF]"
             >
-              <ScanLine className="h-4 w-4" /> Start an inspection
+              <ScanLine className="h-4 w-4" aria-hidden="true" />
+              Start an inspection
             </Link>
           </div>
+        ) : recent.length === 0 ? (
+          <p className="mt-6 text-center text-sm text-slate-600">
+            No inspections match this filter.
+          </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead>
-                <tr className="border-b text-gray-500">
-                  <th className="py-2 pr-4 font-medium">Inspection</th>
-                  <th className="py-2 pr-4 font-medium">Category</th>
-                  <th className="py-2 pr-4 font-medium">Date</th>
-                  <th className="py-2 pr-4 font-medium">Photos</th>
-                  <th className="py-2 pr-4 font-medium">Headline</th>
-                  <th className="py-2 font-medium">Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recent.map((e) => (
-                  <tr key={e.key} className="border-b last:border-0">
-                    <td className="py-2 pr-4">
-                      <span className="block font-medium text-gray-900">{e.title}</span>
-                      <span className="block text-xs text-gray-500">{e.subtitle}</span>
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">{e.category}</td>
-                    <td className="py-2 pr-4 text-gray-600">
-                      {formatDate(e.createdAt)}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">
-                      {e.evidenceUnavailable ? (
-                        <span className="text-xs font-medium text-amber-700">
-                          evidence unavailable
-                        </span>
-                      ) : (
-                        <span>
-                          {e.photoCount} photo{e.photoCount === 1 ? "" : "s"}
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-semibold ${headlineBadge(e.headline)}`}
-                      >
-                        {e.headline}
+          <>
+            <ul className="mt-4 space-y-2 md:hidden">
+              {recent.map((entry) => (
+                <li key={entry.key}>
+                  <Link
+                    href={`/report/${entry.reportId}`}
+                    className="flex min-h-11 flex-col gap-1 rounded-xl border border-slate-200 px-3 py-3 hover:bg-slate-50"
+                  >
+                    <span className="flex items-start justify-between gap-2">
+                      <span className="font-medium text-slate-900">
+                        {entry.title}
                       </span>
-                      {e.isDraft ? (
-                        <span className="ml-1.5 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600 ring-1 ring-inset ring-slate-300">
-                          Draft
-                        </span>
-                      ) : null}
-                    </td>
-                    <td className="py-2">
-                      <Link
-                        href={`/report/${e.reportId}`}
-                        className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                      <span
+                        className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-semibold ${headlineBadge(entry.headline)}`}
                       >
-                        <Eye className="h-3.5 w-3.5" /> View
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
-                {recent.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-6 text-center text-gray-500">
-                      No inspections match your filter.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        )}
-        <p className="mt-3 text-xs text-gray-400">
-          Headlines only — no issue found in assessed checks, suspected violation, or insufficient
-          evidence. The internal test score is never shown as a compliance result.
-        </p>
-      </div>
+                        {headlineLabel(entry.headline)}
+                      </span>
+                    </span>
+                    <span className="text-sm text-slate-600">
+                      {formatDate(entry.createdAt)}
+                      {" · "}
+                      {entry.evidenceUnavailable
+                        ? "Evidence unavailable"
+                        : `${entry.photoCount} photo${entry.photoCount === 1 ? "" : "s"}`}
+                      {" · "}
+                      {categoryLabel(entry.category)}
+                      {isDraftEntry(entry) ? " · Draft" : ""}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
 
-      {!loading && legacyEntries.length > 0 && (
+            <div className="mt-3 hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[640px] text-left text-sm">
+                <thead>
+                  <tr className="border-b border-slate-200 text-slate-600">
+                    <th className="py-2 pr-4 font-medium">Inspection</th>
+                    <th className="py-2 pr-4 font-medium">Category</th>
+                    <th className="py-2 pr-4 font-medium">Date</th>
+                    <th className="py-2 pr-4 font-medium">Photos</th>
+                    <th className="py-2 font-medium">Headline</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recent.map((entry) => (
+                    <tr
+                      key={entry.key}
+                      className="border-b border-slate-100 last:border-0"
+                    >
+                      <td className="py-2.5 pr-4">
+                        <Link
+                          href={`/report/${entry.reportId}`}
+                          className="font-medium text-blue-800 underline-offset-2 hover:underline"
+                        >
+                          {entry.title}
+                        </Link>
+                        {isDraftEntry(entry) ? (
+                          <span className="ml-2 rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-300">
+                            Draft
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className="py-2.5 pr-4 text-slate-700">
+                        {categoryLabel(entry.category)}
+                      </td>
+                      <td className="py-2.5 pr-4 text-slate-700">
+                        {formatDate(entry.createdAt)}
+                      </td>
+                      <td className="py-2.5 pr-4 text-slate-700">
+                        {entry.evidenceUnavailable
+                          ? "Unavailable"
+                          : `${entry.photoCount} photo${entry.photoCount === 1 ? "" : "s"}`}
+                      </td>
+                      <td className="py-2.5">
+                        <span
+                          className={`rounded-md px-2 py-0.5 text-xs font-semibold ${headlineBadge(entry.headline)}`}
+                        >
+                          {headlineLabel(entry.headline)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </section>
+
+      {!loading && legacyEntries.length > 0 ? (
         <section
           aria-label="Older browser records"
-          className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 shadow-sm"
+          className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4"
         >
-          <h2 className="font-semibold text-gray-900">
-            Older browser records (evidence unavailable)
+          <h2 className="text-sm font-semibold text-slate-900">
+            Older browser records
           </h2>
-          <p className="mt-1 text-xs text-gray-500">
-            {legacyEntries.length} older {legacyEntries.length === 1 ? "record" : "records"} from
-            a previous app version. Their photographs cannot be restored after a reload, so they
-            are excluded from the totals and charts above.
+          <p className="mt-1 text-sm text-slate-600">
+            {legacyEntries.length} older{" "}
+            {legacyEntries.length === 1 ? "record" : "records"} from a previous
+            app version. Photographs cannot be restored, so they are left out of
+            the totals above.
           </p>
           <ul className="mt-3 space-y-2">
-            {legacyEntries.map((e) => (
-              <li
-                key={e.key}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm"
-              >
-                <span className="min-w-0">
-                  <span className="block truncate font-medium text-gray-900">{e.title}</span>
-                  <span className="block truncate text-xs text-gray-500">
-                    {e.subtitle} · {formatDate(e.createdAt)} · evidence unavailable
-                  </span>
-                </span>
+            {legacyEntries.map((entry) => (
+              <li key={entry.key}>
                 <Link
-                  href={`/report/${e.reportId}`}
-                  className="inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  href={`/report/${entry.reportId}`}
+                  className="flex min-h-11 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm hover:bg-slate-50"
                 >
-                  <Eye className="h-3.5 w-3.5" /> View
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-slate-900">
+                      {entry.title}
+                    </span>
+                    <span className="block truncate text-xs text-slate-600">
+                      {formatDate(entry.createdAt)} · Evidence unavailable
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-medium text-blue-800">
+                    Open
+                  </span>
                 </Link>
               </li>
             ))}
           </ul>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

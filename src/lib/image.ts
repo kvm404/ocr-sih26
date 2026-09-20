@@ -10,6 +10,8 @@
  * All functions require a browser (canvas / createImageBitmap).
  */
 
+import { log } from "./log";
+
 /** Longest edge of the transmitted image; keeps phone photos small and fast. */
 export const MODEL_IMAGE_MAX_DIM = 1600;
 
@@ -50,7 +52,11 @@ export async function photoBlobToJpegDataUrl(blob: Blob): Promise<string> {
   let bitmap: ImageBitmap;
   try {
     bitmap = await createImageBitmap(blob);
-  } catch {
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    log.error("image", "decode_failed", "Browser could not decode the photo", {
+      data: { type: blob.type, size: blob.size, cause: message },
+    });
     throw new Error("This photo format cannot be opened in the browser — try a JPEG or PNG photo.");
   }
   try {

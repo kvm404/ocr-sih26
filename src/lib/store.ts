@@ -27,6 +27,8 @@
  * `evidenceUnavailable` instead of inventing an image.
  */
 
+import { log } from "./log";
+
 /** Lifecycle of one inspection. */
 export type InspectionStatus = "draft" | "analyzed" | "confirmed";
 
@@ -119,6 +121,43 @@ export class InspectionStoreError extends Error {
     this.name = "InspectionStoreError";
     this.code = code;
   }
+}
+
+/** Short copy for inspect/dashboard/repository banners. Raw causes stay in the log. */
+export function describeStoreError(err: unknown): { title: string; detail: string } {
+  if (err instanceof InspectionStoreError) {
+    switch (err.code) {
+      case "unavailable":
+        return {
+          title: "Browser storage is unavailable",
+          detail: "Photos and inspections cannot be saved in this browser.",
+        };
+      case "quota-exceeded":
+        return {
+          title: "This browser is out of storage",
+          detail: "Remove old inspections, then try again. Nothing new was saved.",
+        };
+      case "not-found":
+        return {
+          title: "That inspection was not found",
+          detail: "It may have been deleted in this browser.",
+        };
+      case "photo-not-found":
+        return {
+          title: "That photograph was not found",
+          detail: "It may already have been removed.",
+        };
+      case "invalid-argument":
+        return {
+          title: "That could not be saved",
+          detail: "Try again with a photograph of the package.",
+        };
+    }
+  }
+  return {
+    title: "Browser storage failed",
+    detail: "Nothing new was saved. Try again.",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,17 +275,27 @@ function toStoreError(err: unknown, op: string): InspectionStoreError {
   const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : "";
   const detail = err instanceof Error ? err.message : String(err);
   if (name === "QuotaExceededError" || /quota/i.test(detail)) {
-    return new InspectionStoreError(
+    const quota = new InspectionStoreError(
       "quota-exceeded",
       `Cannot ${op}: browser storage is full. No data was saved; free space or remove old inspections and retry.`,
       { cause: err },
     );
+    log.error("store", "quota_exceeded", quota.message, {
+      code: quota.code,
+      data: { op, cause: detail },
+    });
+    return quota;
   }
-  return new InspectionStoreError(
+  const unavailable = new InspectionStoreError(
     "unavailable",
     `Cannot ${op}: browser storage is unavailable (${detail || name || "unknown error"}). No data was saved.`,
     { cause: err },
   );
+  log.error("store", "unavailable", unavailable.message, {
+    code: unavailable.code,
+    data: { op, cause: detail, name },
+  });
+  return unavailable;
 }
 
 function assertAvailable(): void {
@@ -314,8 +363,8 @@ export function isStorageAvailable(): boolean {
 }
 
 /**
- * Create a new draft inspection for one physical package and persist it
- * immediately (empty photo set), so a reload never loses the inspection.
+ * Create a new draft inspection for one physical package.
+ * Call this when the first photograph is saved, not on a bare page visit.
  */
 export async function createInspection(input?: {
   categoryHint?: CategoryHint;
@@ -646,6 +695,22 @@ export async function saveInspection(record: InspectionRecord): Promise<Inspecti
   } catch (err) {
     throw toStoreError(err, "save inspection");
   }
+}
+
+/**
+ * Remove draft inspections that never received a photograph. Visiting /scan
+ * used to persist an empty shell on every load, which filled the repository
+ * with "insufficient evidence" cards and no pictures.
+ */
+export async function deleteEmptyDrafts(): Promise<number> {
+  const records = await listInspections();
+  const empty = records.filter(
+    (record) => record.status === "draft" && record.photos.length === 0,
+  );
+  for (const record of empty) {
+    await deleteInspection(record.inspectionId);
+  }
+  return empty.length;
 }
 
 /**

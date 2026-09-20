@@ -212,11 +212,11 @@ export default function ReviewPanel({
       {/* Headline + draft/confirmed state. Unconfirmed stays visibly DRAFT. */}
       <div className="flex flex-wrap items-center gap-2">
         {confirmedAt !== null ? (
-          <span className="inline-flex items-center rounded-full bg-green-100 px-3 py-1 text-xs font-bold text-green-800 ring-1 ring-inset ring-green-300">
+          <span className="inline-flex items-center rounded-md bg-green-100 px-3 py-1 text-xs font-bold text-green-800 ring-1 ring-inset ring-green-300">
             CONFIRMED · {new Date(confirmedAt).toLocaleString()}
           </span>
         ) : (
-          <span className="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
+          <span className="inline-flex items-center rounded-md bg-amber-100 px-3 py-1 text-xs font-bold text-amber-800 ring-1 ring-inset ring-amber-300">
             DRAFT — awaiting reviewer confirmation
           </span>
         )}
@@ -467,7 +467,7 @@ export default function ReviewPanel({
                         "No reliable location — left to reviewer notes.")}
                   </p>
                   {observation.confidence !== "ok" && (
-                    <p className="mt-1 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                    <p className="mt-1 inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
                       {observation.confidence} — needs review
                       {observation.value ? "" : ", value withheld"}
                     </p>
@@ -479,7 +479,7 @@ export default function ReviewPanel({
                   <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900">
                     {fieldLabel(observation.field)}
                     {touched && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
+                      <span className="inline-flex items-center gap-0.5 rounded-md bg-blue-100 px-2 py-0.5 text-[11px] font-semibold text-blue-800">
                         <Pencil className="h-3 w-3" aria-hidden="true" />
                         Corrected
                       </span>
@@ -604,7 +604,7 @@ export default function ReviewPanel({
             >
               <div className="flex flex-wrap items-center gap-2">
                 <span
-                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-bold ring-1 ring-inset ${resultBadge(result.result)}`}
+                  className={`inline-flex items-center rounded-md px-2.5 py-0.5 text-xs font-bold ring-1 ring-inset ${resultBadge(result.result)}`}
                 >
                   {resultLabel(result.result)}
                 </span>
@@ -690,7 +690,7 @@ export default function ReviewPanel({
           type="button"
           onClick={onConfirm}
           disabled={confirmBlockers.length > 0 || confirming || confirmedAt !== null}
-          className="mt-2 inline-flex items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {confirming ? "Confirming…" : "Confirm report"}
         </button>

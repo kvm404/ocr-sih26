@@ -1,390 +1,310 @@
 import Link from "next/link";
+import Image from "next/image";
 import {
+  AlertTriangle,
   ArrowRight,
-  BadgeCheck,
-  CalendarCheck,
+  Calendar,
   Camera,
   CheckCircle2,
-  FileText,
-  Landmark,
-  PhoneCall,
-  Ruler,
-  Scale,
+  ChevronRight,
+  FileOutput,
+  FileSearch,
+  Factory,
+  IndianRupee,
+  Phone,
+  Play,
   ScanLine,
-  ShieldCheck,
-  Tag,
-  UploadCloud,
-  Weight,
-  XCircle,
+  Scale,
+  Type,
+  UserRound,
 } from "lucide-react";
+import InspectionPreview from "@/components/landing/InspectionPreview";
 
-type CheckCard = {
-  icon: React.ComponentType<{ className?: string }>;
-  title: string;
-  rule: string;
-  description: string;
-};
-
-const CHECKS: CheckCard[] = [
+const STEPS = [
   {
-    icon: Landmark,
-    title: "Manufacturer Details",
-    rule: "Rule 6(1)(a) • LM PCR 2011",
-    description:
-      "Name and complete address of the manufacturer, packer or importer declared on the pack.",
+    n: "01",
+    title: "Capture",
+    body: "Upload package photographs.",
+    icon: Camera,
   },
   {
-    icon: Weight,
-    title: "Net Quantity",
-    rule: "Rule 6(1)(e) • LM PCR 2011",
-    description:
-      "Net quantity in standard units (g, kg, ml, L) with prescribed symbols and placement.",
-  },
-  {
-    icon: Tag,
-    title: "MRP Declaration",
-    rule: "Rule 6(1)(m) • LM PCR 2011",
-    description:
-      "Maximum Retail Price inclusive of all taxes, prefixed by MRP and rounded correctly.",
-  },
-  {
-    icon: CalendarCheck,
-    title: "Manufacturing Date",
-    rule: "Rule 6(1)(d) • LM PCR 2011",
-    description:
-      "Month and year of manufacture, packing or import in a clear, unambiguous format.",
-  },
-  {
-    icon: PhoneCall,
-    title: "Consumer Care",
-    rule: "Rule 6(1)(f) • LM PCR 2011",
-    description:
-      "Consumer care name, address, phone and email for complaints and queries.",
-  },
-  {
-    icon: Ruler,
-    title: "Font & Readability",
-    rule: "Rule 7 • LM PCR 2011",
-    description:
-      "Minimum letter height based on pack area, contrast and legibility of declarations.",
-  },
-];
-
-type Stat = { value: string; label: string };
-
-const STATS: Stat[] = [
-  { value: "1,284", label: "Packs scanned" },
-  { value: "10", label: "Compliance checks" },
-  { value: "30 sec", label: "Avg. scan time" },
-  { value: "12", label: "States covered" },
-];
-
-type ReportRow = {
-  label: string;
-  status: "pass" | "fail";
-  note: string;
-};
-
-const REPORT_PREVIEW: ReportRow[] = [
-  { label: "Manufacturer details", status: "pass", note: "Rule 6(1)(a)" },
-  { label: "Net quantity", status: "pass", note: "500 g declared" },
-  { label: "MRP inclusive of taxes", status: "pass", note: "₹145.00" },
-  { label: "Consumer care details", status: "fail", note: "Phone missing" },
-];
-
-type Step = {
-  icon: React.ComponentType<{ className?: string }>;
-  step: string;
-  title: string;
-  description: string;
-};
-
-const STEPS: Step[] = [
-  {
-    icon: UploadCloud,
-    step: "Step 1",
-    title: "Upload photo",
-    description:
-      "Take a photo of the pack's label panel or upload an existing image from your device.",
-  },
-  {
+    n: "02",
+    title: "Extract",
+    body: "Identify and extract declarations using AI.",
     icon: ScanLine,
-    step: "Step 2",
-    title: "AI extracts + validates",
-    description:
-      "OCR extracts declarations and the engine validates each one against LM PCR 2011 rules.",
   },
   {
-    icon: FileText,
-    step: "Step 3",
-    title: "Get PDF report",
-    description:
-      "Receive a pass/fail report with rule references and download it as a printable PDF.",
+    n: "03",
+    title: "Evaluate",
+    body: "Check against supported Legal Metrology rules.",
+    icon: FileSearch,
+  },
+  {
+    n: "04",
+    title: "Review",
+    body: "Verify findings, correct values, and confirm.",
+    icon: UserRound,
+  },
+  {
+    n: "05",
+    title: "Report",
+    body: "Generate PDF or DOCX with the complete record.",
+    icon: FileOutput,
+  },
+];
+
+const CHECKS = [
+  {
+    title: "Manufacturer details",
+    body: "Name and address of the manufacturer, packer, or importer.",
+    icon: Factory,
+  },
+  {
+    title: "Net quantity",
+    body: "Declared quantity and the unit of measurement.",
+    icon: Scale,
+  },
+  {
+    title: "Maximum retail price",
+    body: "MRP inclusive of all taxes, with the rupee mark.",
+    icon: IndianRupee,
+  },
+  {
+    title: "Manufacturing date",
+    body: "Month and year of manufacture, packing, or import.",
+    icon: Calendar,
+  },
+  {
+    title: "Consumer care details",
+    body: "A phone number, email, or address for complaints.",
+    icon: Phone,
+  },
+  {
+    title: "Font and readability",
+    body: "Letter height and contrast so the declaration can be read.",
+    icon: Type,
+  },
+];
+
+const CHECK_COLUMNS = [CHECKS.slice(0, 3), CHECKS.slice(3)];
+
+const RESULTS = [
+  {
+    title: "No issue found",
+    body: "Applicable checks passed on the evidence in the photographs.",
+    icon: CheckCircle2,
+    iconClass: "bg-emerald-50 text-emerald-700",
+    titleClass: "text-emerald-800",
+  },
+  {
+    title: "Suspected violation",
+    body: "A possible problem. A reviewer confirms it before the report is saved.",
+    icon: AlertTriangle,
+    iconClass: "bg-red-50 text-red-800",
+    titleClass: "text-red-800",
+  },
+  {
+    title: "Insufficient evidence",
+    body: "The photographs do not show enough to assess this check.",
+    icon: FileSearch,
+    iconClass: "bg-amber-50 text-amber-800",
+    titleClass: "text-amber-800",
   },
 ];
 
 export default function Home() {
   return (
-    <div>
-      {/* Hero */}
-      <section className="border-b border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-7xl items-center gap-12 px-4 py-14 sm:px-6 lg:grid-cols-2 lg:px-8 lg:py-20">
-          <div>
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 ring-1 ring-inset ring-blue-200">
-              <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-              Ministry of Consumer Affairs • SIH 2026
-            </span>
-            <h1 className="mt-5 text-4xl font-extrabold tracking-tight text-slate-900 sm:text-5xl">
-              Scan any pack. Check legal compliance in seconds.
-            </h1>
-            <p className="mt-4 max-w-xl text-base leading-relaxed text-slate-600 sm:text-lg">
-              NyayaPack reads packaged commodity labels and validates every
-              mandatory declaration under the Legal Metrology (Packaged
-              Commodities) Rules, 2011 — manufacturer, net quantity, MRP,
-              dates, consumer care and more.
+    <div className="bg-white text-slate-900">
+        <section
+          id="product"
+          className="scroll-mt-28 border-b border-slate-100"
+        >
+          <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-12 sm:px-6 lg:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] lg:gap-12 lg:px-8 lg:py-16">
+            <div className="max-w-xl">
+              <h1 className="max-w-[16ch] text-[2.35rem] font-extrabold leading-[1.08] tracking-[-0.03em] text-slate-950 sm:text-5xl lg:text-[3.35rem]">
+                From package photographs to a reviewed record.
+              </h1>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row sm:items-center">
+                <Link
+                  href="/scan"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1E40AF]"
+                >
+                  Start an inspection
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+                <a
+                  href="#how-it-works"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-800 transition-colors hover:bg-slate-50"
+                >
+                  <span className="flex h-5 w-5 items-center justify-center rounded-md border border-slate-300">
+                    <Play className="h-2.5 w-2.5 fill-slate-800 text-slate-800" aria-hidden="true" />
+                  </span>
+                  See how it works
+                </a>
+              </div>
+            </div>
+            <InspectionPreview />
+          </div>
+        </section>
+
+        <section
+          id="how-it-works"
+          className="scroll-mt-28 border-b border-slate-100 bg-white"
+        >
+          <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-semibold tracking-[0.16em] text-slate-500 uppercase">
+                  How NyayaPack works
+                </p>
+                <h2 className="mt-3 max-w-[18ch] text-3xl font-extrabold tracking-[-0.03em] text-slate-950 sm:text-4xl">
+                  A simpler inspection workflow.
+                </h2>
+              </div>
+              <p className="max-w-sm text-sm leading-relaxed text-slate-500 lg:text-right">
+                From a package photo to a complete, reviewable record — in a few
+                clear steps.
+              </p>
+            </div>
+
+            <ol className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-5 lg:gap-5">
+              {STEPS.map((step, i) => (
+                <li key={step.n} className="relative">
+                  {i < STEPS.length - 1 ? (
+                    <ChevronRight
+                      className="pointer-events-none absolute top-8 -right-4 hidden h-4 w-4 text-slate-300 lg:block"
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <div className="rounded-2xl border border-slate-100 bg-[#F8FAFC] px-4 py-5">
+                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white text-[#1D4ED8] shadow-sm ring-1 ring-slate-100">
+                      <step.icon className="h-5 w-5" aria-hidden="true" />
+                    </span>
+                    <p className="mt-5 text-xs font-semibold tracking-wider text-slate-600">
+                      {step.n}
+                    </p>
+                    <h3 className="mt-1 text-base font-bold text-slate-900">
+                      {step.title}
+                    </h3>
+                    <p className="mt-1.5 text-sm leading-relaxed text-slate-500">
+                      {step.body}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        </section>
+
+        <section id="what-we-check" className="scroll-mt-28 bg-white">
+          <div className="mx-auto max-w-6xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
+            <p className="text-xs font-semibold tracking-[0.16em] text-slate-500 uppercase">
+              What we check
             </p>
-            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+            <h2 className="mt-3 max-w-[18ch] text-3xl font-extrabold tracking-[-0.03em] text-slate-950 sm:text-4xl">
+              What each inspection looks for
+            </h2>
+            <p className="mt-4 max-w-[54ch] text-sm leading-relaxed text-slate-600 sm:text-base">
+              Supported declarations from the Packaged Commodities Rules. If
+              the photographs do not show a declaration, that check is not
+              assessed.
+            </p>
+
+            <div className="mt-10 grid overflow-hidden rounded-2xl border border-slate-200 lg:grid-cols-2">
+              {CHECK_COLUMNS.map((column, columnIndex) => (
+                <ul
+                  key={column.map((item) => item.title).join("-")}
+                  className={`divide-y divide-slate-100 ${
+                    columnIndex === 0 ? "lg:border-e lg:border-slate-200" : ""
+                  }`}
+                >
+                  {column.map((check) => (
+                    <li key={check.title} className="flex gap-3.5 px-5 py-4">
+                      <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-50 text-slate-700 ring-1 ring-slate-200/80">
+                        <check.icon className="h-4 w-4" aria-hidden="true" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900">
+                          {check.title}
+                        </p>
+                        <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                          {check.body}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ))}
+            </div>
+
+            <h3 className="mt-12 text-xs font-semibold tracking-[0.16em] text-slate-500 uppercase">
+              How a check can end
+            </h3>
+            <ul className="mt-4 grid overflow-hidden rounded-2xl border border-slate-200 md:grid-cols-3">
+              {RESULTS.map((result, index) => (
+                <li
+                  key={result.title}
+                  className={`flex gap-3 px-5 py-4 ${
+                    index < RESULTS.length - 1
+                      ? "border-b border-slate-200 md:border-e md:border-b-0"
+                      : ""
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${result.iconClass}`}
+                  >
+                    <result.icon className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className={`text-sm font-semibold ${result.titleClass}`}>
+                      {result.title}
+                    </p>
+                    <p className="mt-1 text-sm leading-relaxed text-slate-600">
+                      {result.body}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </section>
+
+        <section className="relative overflow-hidden border-t border-slate-100">
+          <div className="absolute inset-0">
+            <Image
+              src="/landing/label-closeup.jpg"
+              alt=""
+              fill
+              className="object-cover object-right"
+              sizes="100vw"
+            />
+            <div className="absolute inset-0 bg-gradient-to-r from-white via-white/88 to-white/20 sm:via-white/80" />
+          </div>
+          <div className="relative mx-auto grid max-w-6xl items-center gap-8 px-4 py-16 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.7fr)] lg:px-8 lg:py-20">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.16em] text-slate-500 uppercase">
+                Built for a fairer marketplace
+              </p>
+              <h2 className="mt-3 text-3xl font-extrabold tracking-[-0.03em] text-slate-950 sm:text-4xl">
+                See it. Verify it. Ensure it.
+              </h2>
+              <p className="mt-4 max-w-[46ch] text-sm leading-relaxed text-slate-600 sm:text-base">
+                NyayaPack is a prototype for Smart India Hackathon 2026 (Problem
+                Statement 26034). Not for enforcement use.
+              </p>
               <Link
                 href="/scan"
-                className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-700 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-800"
+                className="mt-7 inline-flex h-11 items-center gap-2 rounded-xl bg-[#1D4ED8] px-5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#1E40AF]"
               >
-                <Camera className="h-4 w-4" aria-hidden="true" />
-                Start Scan
-              </Link>
-              <Link
-                href="/dashboard"
-                className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-6 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
-              >
-                View Dashboard
+                Start an inspection
                 <ArrowRight className="h-4 w-4" aria-hidden="true" />
               </Link>
             </div>
-            <p className="mt-4 text-xs text-slate-500">
-              LM Act 2009 • PCR 2011 • Demo prototype — not for enforcement use
+            <p className="hidden max-w-[16ch] justify-self-end text-right text-lg font-semibold leading-snug text-slate-700 lg:block">
+              Clearer inspections for a fairer tomorrow.
             </p>
           </div>
-
-          {/* Mock report card preview */}
-          <div className="relative">
-            <div
-              className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-200/60"
-              aria-label="Sample compliance report preview"
-            >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-700 text-white">
-                    <Scale className="h-4 w-4" aria-hidden="true" />
-                  </span>
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">
-                      Compliance Report
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Sample • Atta 500 g
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-2xl font-extrabold text-slate-900">92%</p>
-                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
-                    Score
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-full w-[92%] rounded-full bg-green-500"
-                  aria-hidden="true"
-                />
-              </div>
-
-              <ul className="mt-5 space-y-2.5">
-                {REPORT_PREVIEW.map((row) => (
-                  <li
-                    key={row.label}
-                    className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      {row.status === "pass" ? (
-                        <CheckCircle2
-                          className="h-5 w-5 shrink-0 text-green-600"
-                          aria-hidden="true"
-                        />
-                      ) : (
-                        <XCircle
-                          className="h-5 w-5 shrink-0 text-red-500"
-                          aria-hidden="true"
-                        />
-                      )}
-                      <span>
-                        <span className="block text-sm font-medium text-slate-800">
-                          {row.label}
-                        </span>
-                        <span className="block text-xs text-slate-500">
-                          {row.note}
-                        </span>
-                      </span>
-                    </span>
-                    <span
-                      className={
-                        row.status === "pass"
-                          ? "rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-semibold text-green-700"
-                          : "rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700"
-                      }
-                    >
-                      {row.status === "pass" ? "PASS" : "FAIL"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-
-              <div className="mt-5 flex gap-2">
-                <span className="flex-1 rounded-md bg-slate-900 px-4 py-2 text-center text-xs font-semibold text-white">
-                  Download PDF
-                </span>
-                <span className="flex-1 rounded-md border border-slate-200 px-4 py-2 text-center text-xs font-semibold text-slate-600">
-                  View details
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Stats strip */}
-      <section className="border-b border-slate-200 bg-slate-900">
-        <dl className="mx-auto grid max-w-7xl grid-cols-2 gap-6 px-4 py-8 sm:px-6 lg:grid-cols-4 lg:px-8">
-          {STATS.map((stat) => (
-            <div key={stat.label} className="text-center">
-              <dt className="order-2 mt-1 text-sm text-slate-400">
-                {stat.label}
-              </dt>
-              <dd className="order-1 text-3xl font-extrabold text-white">
-                {stat.value}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </section>
-
-      {/* What we check */}
-      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-        <div className="max-w-2xl">
-          <p className="text-sm font-semibold uppercase tracking-wider text-blue-700">
-            Coverage
-          </p>
-          <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-            What we check
-          </h2>
-          <p className="mt-3 text-base text-slate-600">
-            Six mandatory declaration groups mapped to the exact rules in the
-            Legal Metrology (Packaged Commodities) Rules, 2011.
-          </p>
-        </div>
-        <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {CHECKS.map((check) => (
-            <div
-              key={check.title}
-              className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
-            >
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
-                <check.icon className="h-5 w-5" aria-hidden="true" />
-              </span>
-              <h3 className="mt-4 text-base font-bold text-slate-900">
-                {check.title}
-              </h3>
-              <p className="mt-1 inline-block rounded bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
-                {check.rule}
-              </p>
-              <p className="mt-2.5 text-sm leading-relaxed text-slate-600">
-                {check.description}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* How it works */}
-      <section className="border-y border-slate-200 bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8 lg:py-20">
-          <div className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-wider text-blue-700">
-              Process
-            </p>
-            <h2 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
-              How it works
-            </h2>
-            <p className="mt-3 text-base text-slate-600">
-              From a label photo to an actionable compliance report in three
-              steps.
-            </p>
-          </div>
-          <ol className="mt-8 grid gap-5 md:grid-cols-3">
-            {STEPS.map((s, i) => (
-              <li
-                key={s.title}
-                className="relative rounded-xl border border-slate-200 bg-slate-50 p-6"
-              >
-                <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-700 text-white">
-                  <s.icon className="h-5 w-5" aria-hidden="true" />
-                </span>
-                <p className="mt-4 text-xs font-bold uppercase tracking-wider text-blue-700">
-                  {s.step}
-                </p>
-                <h3 className="mt-1 text-base font-bold text-slate-900">
-                  {i + 1}. {s.title}
-                </h3>
-                <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                  {s.description}
-                </p>
-              </li>
-            ))}
-          </ol>
-          <div className="mt-8">
-            <Link
-              href="/scan"
-              className="inline-flex items-center gap-2 rounded-md bg-blue-700 px-6 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-800"
-            >
-              <BadgeCheck className="h-4 w-4" aria-hidden="true" />
-              Try it now — scan a pack
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* For enforcement CTA */}
-      <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-        <div className="overflow-hidden rounded-2xl bg-blue-700 px-6 py-12 text-center sm:px-12">
-          <ShieldCheck
-            className="mx-auto h-10 w-10 text-blue-200"
-            aria-hidden="true"
-          />
-          <h2 className="mx-auto mt-4 max-w-2xl text-2xl font-bold tracking-tight text-white sm:text-3xl">
-            For enforcement teams: track violations across markets
-          </h2>
-          <p className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-blue-100 sm:text-base">
-            The inspector dashboard aggregates scan results, flags repeat
-            offenders and high-risk categories, and exports evidence-ready
-            reports for field action.
-          </p>
-          <div className="mt-7 flex flex-col justify-center gap-3 sm:flex-row">
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center justify-center gap-2 rounded-md bg-white px-6 py-3 text-sm font-semibold text-blue-700 transition-colors hover:bg-blue-50"
-            >
-              Open Dashboard
-              <ArrowRight className="h-4 w-4" aria-hidden="true" />
-            </Link>
-            <Link
-              href="/repository"
-              className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-500 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-blue-800"
-            >
-              Browse Repository
-            </Link>
-          </div>
-        </div>
-      </section>
+        </section>
     </div>
   );
 }

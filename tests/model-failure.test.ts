@@ -7,7 +7,11 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { analyzePhotos, ModelClientError } from "../src/lib/model-client";
+import {
+  analyzePhotos,
+  describeModelError,
+  ModelClientError,
+} from "../src/lib/model-client";
 
 const PHOTO = {
   id: "p-front",
@@ -54,6 +58,30 @@ describe("model-failure path: error, no report", () => {
     const err = await analyzePhotos([PHOTO]).catch((e) => e);
     expect(err).toBeInstanceOf(ModelClientError);
     expect((err as ModelClientError).code).toBe("BAD_RESPONSE");
+  });
+
+  it("HTTP 502 JSON body is a connection error, not dumped JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error:
+              "Cannot reach the local model server. Is LM Studio running with the local server enabled?",
+          }),
+          { status: 502, statusText: "Bad Gateway" },
+        ),
+      ),
+    );
+    const err = await analyzePhotos([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("CONNECTION_FAILED");
+    expect((err as ModelClientError).message).not.toMatch(/\{/);
+    expect((err as ModelClientError).message).not.toMatch(/HTTP 502/);
+    const copy = describeModelError(err);
+    expect(copy.title).toBe("Can't reach the vision model");
+    expect(copy.detail).not.toMatch(/\{/);
+    expect(copy.offerSettings).toBe(true);
   });
 
   it("garbage JSON body -> BAD_RESPONSE, no report", async () => {

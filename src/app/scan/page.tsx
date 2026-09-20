@@ -2,26 +2,40 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Play } from "lucide-react";
+import { ArrowLeft, Loader2, Play } from "lucide-react";
 import UploadZone, { type UploadZonePhoto } from "@/components/UploadZone";
 import ReviewPanel, {
   buildReviewedInputs,
   type ReviewState,
 } from "@/components/ReviewPanel";
+import { Notice, type NoticeCopy } from "@/components/Notice";
 import { photoBlobToJpegDataUrl } from "@/lib/image";
 import { saveReview } from "@/lib/review-store";
-import { analyzePackage, ModelClientError } from "@/lib/model-client";
+import { analyzePackage, describeModelError } from "@/lib/model-client";
+import { errorDetail, log } from "@/lib/log";
 import type { ExtractionResult } from "@/lib/observations";
 import { computeHeadline, evaluateRules } from "@/lib/rules";
 import {
   addPhotos,
   createInspection,
+  describeStoreError,
+  isStorageAvailable,
   removePhoto,
   saveInspection,
 } from "@/lib/store";
 import type { InspectionRecord } from "@/lib/store";
 import type { CategoryHint } from "@/lib/store";
 import type { ImportStatus, ReportHeadline, RuleResult } from "@/lib/types";
+
+function noticeFromModel(err: unknown): NoticeCopy {
+  const copy = describeModelError(err);
+  return {
+    title: copy.title,
+    detail: copy.detail,
+    href: copy.offerSettings ? "/settings" : undefined,
+    hrefLabel: copy.offerSettings ? "Open Settings" : undefined,
+  };
+}
 
 /** Store-hint value -> display label for the model prompt. */
 function hintToModelLabel(hint: string): string {
@@ -75,7 +89,7 @@ export default function ScanPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeProgress, setAnalyzeProgress] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<NoticeCopy | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [extraction, setExtraction] = useState<ExtractionResult | null>(null);
@@ -83,27 +97,17 @@ export default function ScanPage() {
   const [ruleResults, setRuleResults] = useState<RuleResult[]>([]);
   const [headline, setHeadline] = useState<ReportHeadline>("insufficient evidence");
   const [confirmedAt, setConfirmedAt] = useState<string | null>(null);
+  const [stage, setStage] = useState<"photos" | "review">("photos");
 
-  // One inspection per page visit; photos persist in IndexedDB on every
-  // add/remove so a reload never loses the evidence.
+  const creatingRef = useRef<Promise<InspectionRecord> | null>(null);
+
   useEffect(() => {
-    let cancelled = false;
-    createInspection()
-      .then((created) => {
-        if (!cancelled) setRecord(created);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(
-            err instanceof Error
-              ? `Browser storage is unavailable — photos cannot be saved. (${err.message})`
-              : "Browser storage is unavailable — photos cannot be saved.",
-          );
-        }
+    if (!isStorageAvailable()) {
+      setError({
+        title: "Browser storage is unavailable",
+        detail: "Photos cannot be saved in this browser.",
       });
-    return () => {
-      cancelled = true;
-    };
+    }
   }, []);
 
   // Revoke preview URLs on unmount.
@@ -138,6 +142,7 @@ export default function ScanPage() {
     setHeadline("insufficient evidence");
     setConfirmedAt(null);
     setNotice(reason);
+    setStage("photos");
   }
 
   function handleHintChange(next: string) {
@@ -153,30 +158,56 @@ export default function ScanPage() {
     }
   }
 
+  async function ensureRecord(): Promise<InspectionRecord> {
+    if (record) return record;
+    if (!creatingRef.current) {
+      creatingRef.current = createInspection({
+        categoryHint: hint as CategoryHint,
+      });
+    }
+    try {
+      const created = await creatingRef.current;
+      setRecord(created);
+      return created;
+    } catch (err) {
+      creatingRef.current = null;
+      throw err;
+    }
+  }
+
   async function handleFilesSelect(files: File[]) {
-    if (!record || analyzing || confirming) return;
+    if (analyzing || confirming || files.length === 0) return;
     setError(null);
     try {
-      const added = await addPhotos(record.inspectionId, files);
+      const current = await ensureRecord();
+      const added = await addPhotos(current.inspectionId, files);
       const urls: Record<string, string> = {};
       for (const photo of added.photos) {
         urls[photo.photoId] = URL.createObjectURL(photo.blob);
       }
       setPhotoUrls((prev) => ({ ...prev, ...urls }));
-      setRecord((prev) =>
-        prev
-          ? { ...prev, photos: [...prev.photos, ...added.photos], updatedAt: added.updatedAt }
-          : prev,
-      );
+      setRecord({
+        ...current,
+        photos: [...current.photos, ...added.photos],
+        updatedAt: added.updatedAt,
+      });
+      log.info("scan", "photos_saved", "Photographs stored for this inspection", {
+        data: {
+          inspectionId: current.inspectionId,
+          added: added.photos.length,
+          total: current.photos.length + added.photos.length,
+        },
+      });
       if (extraction) {
         resetAnalysis("Photos changed — run the analysis again on the new set.");
       }
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? `Photos were not saved. (${err.message})`
-          : "Photos were not saved.",
-      );
+      const detail = errorDetail(err);
+      log.error("scan", "photos_save_failed", detail.message, {
+        code: detail.code,
+        data: { count: files.length },
+      });
+      setError(describeStoreError(err));
     }
   }
 
@@ -197,11 +228,10 @@ export default function ScanPage() {
         resetAnalysis("Photos changed — run the analysis again on the new set.");
       }
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? `Photo was not removed. (${err.message})`
-          : "Photo was not removed.",
-      );
+      setError({
+        title: "Photo was not removed",
+        detail: describeStoreError(err).detail,
+      });
     }
   }
 
@@ -248,12 +278,19 @@ export default function ScanPage() {
   async function handleAnalyze() {
     if (!record || analyzing || confirming) return;
     if (record.photos.length === 0) {
-      setError("Upload at least one package photo first.");
+      setError({ title: "Add a photograph first" });
       return;
     }
     setError(null);
     setNotice(null);
     setAnalyzing(true);
+    log.info("scan", "analyze_start", "Running vision analysis", {
+      data: {
+        inspectionId: record.inspectionId,
+        photoCount: record.photos.length,
+        hint,
+      },
+    });
     setAnalyzeProgress(
       record.photos.length > 1
         ? `Analyzing photo 1 of ${record.photos.length}…`
@@ -279,9 +316,11 @@ export default function ScanPage() {
       const hasIdentity = Boolean(parsed.identity.brand || parsed.identity.productName);
       const anyAttested = parsed.unattestedPhotoIds.length < record.photos.length;
       if (parsed.observations.length === 0 && !hasIdentity && !anyAttested) {
-        setError(
-          "The model looked at these photos but found no readable package identity or declarations. No report was created — try clearer, well-lit views of the front and the information panel, then run the analysis again.",
-        );
+        setError({
+          title: "Nothing readable in these photos",
+          detail:
+            "Try clearer, well-lit views of the front and the information panel, then run the analysis again.",
+        });
         return;
       }
 
@@ -319,12 +358,24 @@ export default function ScanPage() {
       });
       setRecord(analyzed);
       persistReviewPayload(record.inspectionId, parsed, initialReview, null);
+      setStage("review");
+      window.scrollTo(0, 0);
+      log.info("scan", "analyze_ok", "Analysis stored as a draft review", {
+        data: {
+          inspectionId: record.inspectionId,
+          observationCount: parsed.observations.length,
+          headline: draftHeadline,
+        },
+      });
     } catch (err) {
       // ModelClientError carries the honest server/connectivity reason.
       // No report is created and there is no navigation.
-      if (err instanceof ModelClientError) setError(`${err.message} No report was created.`);
-      else if (err instanceof Error) setError(`${err.message} No report was created.`);
-      else setError("Analysis failed unexpectedly. No report was created.");
+      const detail = errorDetail(err);
+      log.error("scan", "analyze_failed", detail.message, {
+        code: detail.code,
+        data: { inspectionId: record.inspectionId },
+      });
+      setError(noticeFromModel(err));
     } finally {
       setAnalyzing(false);
       setAnalyzeProgress(null);
@@ -393,113 +444,142 @@ export default function ScanPage() {
       setConfirmedAt(at);
       router.push(`/report/${record.inspectionId}`);
     } catch (err) {
-      setError(
-        err instanceof Error
-          ? `Confirmation was not saved. (${err.message})`
-          : "Confirmation was not saved.",
-      );
+      setError({
+        title: "Confirmation was not saved",
+        detail: describeStoreError(err).detail,
+      });
       setConfirming(false);
     }
   }
 
-  const busy = analyzing || confirming || record === null;
+  const busy = analyzing || confirming;
+  const photoCount = record?.photos.length ?? 0;
+  const onReview = stage === "review" && extraction !== null && review !== null;
+  const showMobileDock = !onReview && !confirmedAt;
   const currentStep =
-    confirmedAt !== null ? 4 : extraction !== null ? 2 : record && record.photos.length > 0 ? 1 : 0;
+    confirmedAt !== null ? 4 : extraction !== null ? 2 : photoCount > 0 ? 1 : 0;
+
+  const analyzeButton = (
+    <button
+      type="button"
+      onClick={handleAnalyze}
+      disabled={busy || photoCount === 0}
+      className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#1D4ED8] px-4 text-sm font-semibold text-white shadow-sm hover:bg-[#1E40AF] disabled:cursor-not-allowed disabled:bg-slate-300"
+    >
+      {analyzing ? (
+        <>
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+          {analyzeProgress ?? "Analyzing photos…"}
+        </>
+      ) : (
+        <>
+          <Play className="h-4 w-4" aria-hidden="true" />
+          Analyze with vision model
+        </>
+      )}
+    </button>
+  );
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-          Scan a Packaged Commodity
-        </h1>
-        <p className="mt-1 text-sm text-slate-600 sm:text-base">
-          One inspection covers one physical package. Upload its photographs,
-          run the vision-model analysis, review each finding against its photo,
-          then confirm the report.
-        </p>
-        {record && (
-          <p className="mt-1 font-mono text-xs text-slate-400">
-            Inspection {record.inspectionId} · status {record.status}
-          </p>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <div className="space-y-5">
-          <UploadZone
-            photos={uploadPhotos}
-            categoryHint={hint}
-            onCategoryHintChange={handleHintChange}
-            onFilesSelect={handleFilesSelect}
-            onRemovePhoto={handleRemovePhoto}
-            currentStep={currentStep}
-            disabled={busy}
-          />
-
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-            {error ? (
-              <p
-                role="alert"
-                className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-              >
-                {error}
-              </p>
-            ) : null}
-            {notice ? (
-              <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-                {notice}
-              </p>
-            ) : null}
+    <div
+      className={`mx-auto max-w-5xl px-4 pt-4 sm:px-6 sm:pt-8 lg:px-8 lg:pb-8 ${
+        showMobileDock ? "pb-28" : "pb-8"
+      }`}
+    >
+      {onReview ? (
+        <>
+          <div className="mb-4 sm:mb-6">
             <button
               type="button"
-              onClick={handleAnalyze}
-              disabled={busy || record === null || record.photos.length === 0}
-              className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-300 sm:w-auto"
+              onClick={() => setStage("photos")}
+              className="inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-slate-700 hover:text-slate-900"
             >
-              {analyzing ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  {analyzeProgress ?? "Analyzing photos…"}
-                </>
-              ) : (
-                <>
-                  <Play className="h-4 w-4" aria-hidden="true" />
-                  Analyze with vision model
-                </>
-              )}
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              Back to photos
             </button>
-            <p className="mt-2 text-xs text-slate-500">
-              Photos go to the configured vision model (local LM Studio by
-              default; see Settings). The API key, if any, lives in session
-              memory only. A failed or empty model response is an error — never
-              a substitute report.
+            <h1 className="mt-3 text-2xl font-extrabold tracking-[-0.03em] text-slate-950 sm:text-3xl">
+              Review findings
+            </h1>
+            <p className="mt-1 text-sm text-slate-600">
+              Check each reading against its photograph, then confirm the
+              report.
             </p>
           </div>
-        </div>
-
-        <div className="space-y-5">
-          {extraction && review ? (
-            <ReviewPanel
-              inspectionId={record?.inspectionId ?? ""}
-              photos={uploadPhotos.filter((photo) => photo.url !== "")}
-              extraction={extraction}
-              review={review}
-              onReviewChange={handleReviewChange}
-              ruleResults={ruleResults}
-              headline={headline}
-              confirming={confirming}
-              confirmedAt={confirmedAt}
-              confirmBlockers={confirmBlockers}
-              onConfirm={handleConfirm}
-            />
-          ) : (
-            <div className="flex h-48 items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-4 text-center text-sm text-slate-400">
-              Analysis results and reviewer checks will appear here after you
-              upload photos and run the analysis.
+          {error ? (
+            <div className="mb-4">
+              <Notice {...error} />
             </div>
-          )}
-        </div>
-      </div>
+          ) : null}
+          <ReviewPanel
+            inspectionId={record?.inspectionId ?? ""}
+            photos={uploadPhotos.filter((photo) => photo.url !== "")}
+            extraction={extraction}
+            review={review}
+            onReviewChange={handleReviewChange}
+            ruleResults={ruleResults}
+            headline={headline}
+            confirming={confirming}
+            confirmedAt={confirmedAt}
+            confirmBlockers={confirmBlockers}
+            onConfirm={handleConfirm}
+          />
+        </>
+      ) : (
+        <>
+          <div className="mb-4 sm:mb-6">
+            <h1 className="text-2xl font-extrabold tracking-[-0.03em] text-slate-950 sm:text-3xl">
+              Photograph the package
+            </h1>
+            <p className="mt-1 text-sm text-slate-600 sm:text-base">
+              One inspection is one physical package. Add the front, back, and
+              any side with declarations, then run the analysis.
+            </p>
+          </div>
+
+          <div className="space-y-5">
+            <UploadZone
+              photos={uploadPhotos}
+              categoryHint={hint}
+              onCategoryHintChange={handleHintChange}
+              onFilesSelect={handleFilesSelect}
+              onRemovePhoto={handleRemovePhoto}
+              currentStep={currentStep}
+              disabled={busy}
+            />
+
+            {error ? <Notice {...error} /> : null}
+            {notice ? <Notice tone="info" title={notice} /> : null}
+
+            {extraction && review ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setStage("review");
+                  window.scrollTo(0, 0);
+                }}
+                className="inline-flex min-h-11 items-center text-sm font-medium text-blue-800 hover:text-blue-900"
+              >
+                Open current analysis
+              </button>
+            ) : null}
+
+            <div className="hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:block">
+              {analyzeButton}
+            </div>
+          </div>
+
+          {showMobileDock ? (
+            <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-8px_24px_rgba(15,23,42,0.08)] md:hidden">
+              {analyzeButton}
+              <p className="mt-1.5 text-center text-xs text-slate-600">
+                {photoCount === 0
+                  ? "Take at least one photograph first."
+                  : `${photoCount} photo${photoCount === 1 ? "" : "s"} ready to analyze.`}
+              </p>
+            </div>
+          ) : null}
+        </>
+      )}
     </div>
   );
 }

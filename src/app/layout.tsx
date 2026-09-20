@@ -1,15 +1,22 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
+import AppShell from "@/components/AppShell";
+import LogProbe from "@/components/LogProbe";
 import "./globals.css";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "NyayaPack - LM Packaged Commodities Compliance Checker",
+  title: "NyayaPack - packaged commodity inspection",
   description:
-    "Scan any packaged commodity and check Legal Metrology (Packaged Commodities) Rules, 2011 compliance in seconds. A prototype for SIH 2026.",
+    "Inspect packaged commodities against Legal Metrology (Packaged Commodities) Rules, 2011. A prototype for SIH 2026.",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({
@@ -18,11 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={`${inter.className} antialiased`}>
-        <Header />
-        <main className="min-h-screen bg-slate-50">{children}</main>
-        <Footer />
+    <html lang="en" data-scroll-behavior="smooth">
+      <body className={`${inter.className} ${inter.variable} antialiased`}>
+        <LogProbe />
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

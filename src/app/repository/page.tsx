@@ -5,9 +5,12 @@ import Link from "next/link";
 import { ArrowRight, Download, Loader2, PackageSearch, ScanLine, Search } from "lucide-react";
 import {
   isStorageAvailable,
+  deleteEmptyDrafts,
+  describeStoreError,
   listInspections,
   listLegacyReports,
 } from "@/lib/store";
+import { Notice, type NoticeCopy } from "@/components/Notice";
 import {
   headlineFromLegacyStatus,
   headlineFromResults,
@@ -162,7 +165,7 @@ export default function RepositoryPage() {
   const [realHeadlines, setRealHeadlines] = useState<Record<string, RealHeadline>>({});
   const [coverUrls, setCoverUrls] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<NoticeCopy | null>(null);
   const [query, setQuery] = useState("");
   const [headline, setHeadline] = useState<HeadlineFilter>("All");
   const [category, setCategory] = useState<string>("All");
@@ -177,13 +180,17 @@ export default function RepositoryPage() {
             setInspections([]);
             setRealHeadlines({});
             setLegacy(listLegacyReports());
-            setLoadError(
-              "Browser storage (IndexedDB) is unavailable, so saved inspections cannot be listed on this device.",
-            );
+            setLoadError({
+              title: "Browser storage is unavailable",
+              detail: "Saved inspections cannot be listed in this browser.",
+            });
           }
           return;
         }
-        const records = await listInspections();
+        await deleteEmptyDrafts();
+        const records = (await listInspections()).filter(
+          (record) => record.photos.length > 0,
+        );
         // Real per-record headlines from reviewer state (sync localStorage
         // reads resolved here so the loading state below covers them).
         const headlines: Record<string, RealHeadline> = {};
@@ -210,9 +217,7 @@ export default function RepositoryPage() {
           } catch {
             setLegacy([]);
           }
-          setLoadError(
-            err instanceof Error ? err.message : "Could not list saved inspections.",
-          );
+          setLoadError(describeStoreError(err));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -337,45 +342,41 @@ export default function RepositoryPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl space-y-5 p-4 sm:p-6">
+    <div className="mx-auto max-w-6xl space-y-5 px-4 py-4 sm:px-6 sm:py-6 lg:px-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            Saved Inspections Repository
+          <h1 className="text-2xl font-extrabold tracking-[-0.03em] text-slate-950">
+            Saved inspections
           </h1>
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-slate-600">
             {loading ? "Loading…" : `${filtered.length} inspection${filtered.length === 1 ? "" : "s"} found`} · real records only
           </p>
         </div>
         <button
           onClick={exportCsv}
           disabled={loading || filtered.length === 0}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           <Download className="h-4 w-4" /> Export CSV
         </button>
       </div>
 
-      {loadError && !loading ? (
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700" role="alert">
-          {loadError}
-        </div>
-      ) : null}
+      {loadError && !loading ? <Notice {...loadError} /> : null}
 
-      <div className="grid grid-cols-1 gap-3 rounded-xl border border-gray-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
         <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search name, ID, or category…"
-            className="w-full rounded-lg border border-gray-300 py-2 pl-8 pr-3 text-sm focus:border-blue-500 focus:outline-none"
+            className="w-full rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm focus:border-blue-500 focus:outline-none"
           />
         </div>
         <select
           value={headline}
           onChange={(e) => setHeadline(e.target.value as HeadlineFilter)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           aria-label="Filter by headline"
         >
           {HEADLINE_OPTIONS.map((s) => (
@@ -387,7 +388,7 @@ export default function RepositoryPage() {
         <select
           value={category}
           onChange={(e) => setCategory(e.target.value)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           aria-label="Filter by category"
         >
           {categories.map((c) => (
@@ -399,7 +400,7 @@ export default function RepositoryPage() {
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           aria-label="Sort inspections"
         >
           <option value="newest">Newest first</option>
@@ -411,7 +412,7 @@ export default function RepositoryPage() {
 
       {loading ? (
         <div
-          className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-500"
+          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500"
           role="status"
           aria-live="polite"
         >
@@ -419,16 +420,16 @@ export default function RepositoryPage() {
           Loading saved inspections…
         </div>
       ) : inspectionEntries.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
-          <PackageSearch className="h-10 w-10 text-gray-300" />
-          <p className="font-medium text-gray-700">No inspections yet</p>
-          <p className="max-w-md text-sm text-gray-500">
-            Nothing has been scanned on this laptop. Photograph a package to create the first
-            real inspection — no sample products are shown here.
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center">
+          <PackageSearch className="h-10 w-10 text-slate-300" />
+          <p className="font-medium text-slate-700">No inspections yet</p>
+          <p className="max-w-md text-sm text-slate-500">
+            Photograph a package to create the first inspection. Empty visits
+            to the inspect page are not saved.
           </p>
           <Link
             href="/scan"
-            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700"
           >
             <ScanLine className="h-4 w-4" /> Start an inspection
           </Link>
@@ -443,7 +444,7 @@ export default function RepositoryPage() {
             return (
               <div
                 key={entry.key}
-                className="flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm"
+                className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
               >
                 {cover ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -457,9 +458,9 @@ export default function RepositoryPage() {
                     }}
                   />
                 ) : (
-                  <div className="flex h-40 w-full flex-col items-center justify-center gap-1 bg-gray-50 px-4 text-center">
-                    <PackageSearch className="h-8 w-8 text-gray-300" />
-                    <p className="text-xs font-medium text-gray-500">
+                  <div className="flex h-40 w-full flex-col items-center justify-center gap-1 bg-slate-50 px-4 text-center">
+                    <PackageSearch className="h-8 w-8 text-slate-300" />
+                    <p className="text-xs font-medium text-slate-500">
                       {entry.evidenceUnavailable
                         ? "evidence unavailable — the original image cannot be restored"
                         : "no preview available"}
@@ -469,33 +470,33 @@ export default function RepositoryPage() {
                 <div className="flex flex-1 flex-col gap-2 p-4">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <h3 className="truncate font-semibold text-gray-900">{entry.title}</h3>
-                      <p className="truncate text-sm text-gray-500">{entry.subtitle}</p>
+                      <h3 className="truncate font-semibold text-slate-900">{entry.title}</h3>
+                      <p className="truncate text-sm text-slate-500">{entry.subtitle}</p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
+                    <span className="shrink-0 rounded-md bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
                       {entry.photoCount} photo{entry.photoCount === 1 ? "" : "s"}
                     </span>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span
-                      className={`rounded-full px-2 py-0.5 font-semibold ${headlineBadge(entry.headline)}`}
+                      className={`rounded-md px-2 py-0.5 font-semibold ${headlineBadge(entry.headline)}`}
                     >
                       {entry.headline}
                     </span>
                     {entry.isDraft ? (
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 ring-1 ring-inset ring-slate-300">
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 font-semibold text-slate-600 ring-1 ring-inset ring-slate-300">
                         Draft
                       </span>
                     ) : null}
-                    <span className="text-gray-400">{formatDate(entry.createdAt)}</span>
+                    <span className="text-slate-400">{formatDate(entry.createdAt)}</span>
                   </div>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-xs text-slate-500">
                     {entry.category} · {entry.statusNote}
                     {entry.evidenceUnavailable ? " · evidence unavailable" : ""}
                   </p>
                   <Link
                     href={`/report/${entry.reportId}`}
-                    className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                    className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
                   >
                     View Report <ArrowRight className="h-4 w-4" />
                   </Link>
@@ -505,27 +506,27 @@ export default function RepositoryPage() {
           })}
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-gray-300 bg-white py-16 text-center">
-          <PackageSearch className="h-10 w-10 text-gray-300" />
-          <p className="font-medium text-gray-700">No inspections found</p>
-          <p className="text-sm text-gray-500">
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-slate-300 bg-white py-16 text-center">
+          <PackageSearch className="h-10 w-10 text-slate-300" />
+          <p className="font-medium text-slate-700">No inspections found</p>
+          <p className="text-sm text-slate-500">
             Try adjusting your search or filters.
           </p>
         </div>
       )}
-      <p className="text-xs text-gray-400">
+      <p className="text-xs text-slate-400">
         Headlines only — no issue found in assessed checks, suspected violation, or insufficient
         evidence. The internal test score is never shown as a compliance result.
       </p>
       {!loading && legacyEntries.length > 0 && (
         <section
           aria-label="Older browser records"
-          className="rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 shadow-sm"
+          className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-4 shadow-sm"
         >
-          <h2 className="font-semibold text-gray-900">
+          <h2 className="font-semibold text-slate-900">
             Older browser records (evidence unavailable)
           </h2>
-          <p className="mt-1 text-xs text-gray-500">
+          <p className="mt-1 text-xs text-slate-500">
             {legacyEntries.length} older {legacyEntries.length === 1 ? "record" : "records"} from
             a previous app version. Their photographs cannot be restored after a reload, so they
             are excluded from the search, filters, and CSV export above.
@@ -534,26 +535,26 @@ export default function RepositoryPage() {
             {legacyEntries.map((entry) => (
               <li
                 key={entry.key}
-                className="flex flex-col gap-2 rounded-xl border border-gray-200 bg-white p-4 shadow-sm"
+                className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm"
               >
                 <div className="min-w-0">
-                  <h3 className="truncate font-semibold text-gray-900">{entry.title}</h3>
-                  <p className="truncate text-sm text-gray-500">{entry.subtitle}</p>
+                  <h3 className="truncate font-semibold text-slate-900">{entry.title}</h3>
+                  <p className="truncate text-sm text-slate-500">{entry.subtitle}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
                   <span
-                    className={`rounded-full px-2 py-0.5 font-semibold ${headlineBadge(entry.headline)}`}
+                    className={`rounded-md px-2 py-0.5 font-semibold ${headlineBadge(entry.headline)}`}
                   >
                     {entry.headline}
                   </span>
-                  <span className="text-gray-400">{formatDate(entry.createdAt)}</span>
+                  <span className="text-slate-400">{formatDate(entry.createdAt)}</span>
                 </div>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-slate-500">
                   {entry.category} · {entry.statusNote} · evidence unavailable
                 </p>
                 <Link
                   href={`/report/${entry.reportId}`}
-                  className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700"
+                  className="mt-auto inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
                 >
                   View Report <ArrowRight className="h-4 w-4" />
                 </Link>
