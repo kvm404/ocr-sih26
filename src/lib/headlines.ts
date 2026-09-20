@@ -15,7 +15,7 @@ import type { ObservedInput, ReportHeadline, ReviewContext, RuleResult } from ".
 import type { ObservedDeclaration } from "./observations";
 import { toObservedInputs } from "./observations";
 import { loadReview } from "./review-store";
-import { computeHeadline, evaluateRules } from "./rules";
+import { computeHeadline, evaluateRules, resultsForHeadline } from "./rules";
 
 /** Tolerant headline normalization: display/underscore/dash forms. */
 export function normalizeHeadline(value: unknown): ReportHeadline | null {
@@ -212,9 +212,10 @@ export function resolveRealHeadline(
     photoCount,
   };
   const results = evaluateRules(inputs, ctx);
+  const forHeadline = resultsForHeadline(results, review.decisions);
   return {
-    headline: computeHeadline(results),
+    headline: computeHeadline(forHeadline),
     isDraft: review.confirmedAt == null,
-    results,
+    results: forHeadline,
   };
 }

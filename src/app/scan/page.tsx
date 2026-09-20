@@ -14,7 +14,7 @@ import { describeReviewError, ReviewStoreError, saveReview } from "@/lib/review-
 import { analyzePackage, describeModelError } from "@/lib/model-client";
 import { errorDetail, log } from "@/lib/log";
 import type { ExtractionResult } from "@/lib/observations";
-import { computeHeadline, evaluateRules } from "@/lib/rules";
+import { computeHeadline, evaluateRules, resultsForHeadline } from "@/lib/rules";
 import {
   addPhotos,
   createInspection,
@@ -280,6 +280,7 @@ export default function ScanPage() {
     importStatus: ImportStatus,
     coverageConfirmed: boolean,
     photoCount: number,
+    decisions: Record<string, "accepted" | "rejected"> = {},
   ): { results: RuleResult[]; headline: ReportHeadline } {
     const inputs = buildReviewedInputs(observations, correctedTexts);
     const results = evaluateRules(inputs, {
@@ -288,7 +289,10 @@ export default function ScanPage() {
       coverageConfirmed,
       photoCount,
     });
-    return { results, headline: computeHeadline(results) };
+    return {
+      results,
+      headline: computeHeadline(resultsForHeadline(results, decisions)),
+    };
   }
 
   function persistReviewPayload(
@@ -366,20 +370,22 @@ export default function ScanPage() {
       const initialReview: ReviewState = {
         correctedTexts: {},
         reviewedCategory: ctxCategory,
-        reviewedImport: parsed.importSuggestion,
+        reviewedImport: "unknown",
         coverageConfirmed: false,
         decisions: {},
         productName: parsed.identity.productName ?? "",
         brand: parsed.identity.brand ?? "",
         samePackageConfirmed: false,
       };
-      // Draft evaluation: coverage unconfirmed, so nothing can be called
-      // missing yet — absent declarations stay "not assessed".
+      // Draft evaluation: coverage unconfirmed and import unconfirmed, so
+      // nothing can be called missing yet — absent declarations stay
+      // "not assessed". The model import suggestion is shown in the panel
+      // but does not run the importer limb until the reviewer confirms it.
       const { results, headline: draftHeadline } = runRules(
         parsed.observations,
         {},
         ctxCategory,
-        parsed.importSuggestion,
+        "unknown",
         false,
         record.photos.length,
       );
@@ -443,6 +449,7 @@ export default function ScanPage() {
       next.reviewedImport,
       next.coverageConfirmed,
       record.photos.length,
+      next.decisions,
     );
     setRuleResults(results);
     setHeadline(nextHeadline);

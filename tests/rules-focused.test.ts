@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from "vitest";
 import { assessFontHeight } from "../src/lib/readability";
-import { evaluateRules } from "../src/lib/rules";
+import { computeHeadline, evaluateRules, resultsForHeadline } from "../src/lib/rules";
 import type { ObservedInput, ReviewContext } from "../src/lib/types";
 
 function ctxFor(category: string): ReviewContext {
@@ -70,6 +70,33 @@ describe("unknown import status -> manufacturer check not_assessed", () => {
     expect(res?.result).toBe("not_assessed");
     expect(res?.message).toMatch(/import status is unconfirmed/i);
     expect(res?.evidence?.value).toBe("Acme Ltd, Mumbai");
+  });
+});
+
+describe("rejected suspected violations do not keep the suspected-violation headline", () => {
+  const missingMrp: ObservedInput[] = [
+    readable("manufacturer", "Acme Ltd, Mumbai"),
+    { field: "mrp", value: null, photoId: "p-front", needsReview: false },
+    readable("net_quantity", "500 g"),
+    readable("consumer_care", "1800-123-456"),
+  ];
+
+  it("pending or accepted suspected violation still headlines as suspected violation", () => {
+    const results = evaluateRules(missingMrp, ctxFor("household"));
+    expect(computeHeadline(results)).toBe("suspected violation");
+    expect(computeHeadline(resultsForHeadline(results, { mrp: "accepted" }))).toBe(
+      "suspected violation",
+    );
+    const mrp = results.find((r) => r.ruleId === "mrp");
+    expect(mrp?.result).toBe("suspected_violation");
+  });
+
+  it("rejecting the only suspected violation yields no issue found in assessed checks", () => {
+    const results = evaluateRules(missingMrp, ctxFor("household"));
+    const forHeadline = resultsForHeadline(results, { mrp: "rejected" });
+    expect(computeHeadline(forHeadline)).toBe("no issue found in assessed checks");
+    expect(results.find((r) => r.ruleId === "mrp")?.result).toBe("suspected_violation");
+    expect(forHeadline.find((r) => r.ruleId === "mrp")?.result).toBe("no_issue_found");
   });
 });
 

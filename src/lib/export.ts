@@ -29,7 +29,7 @@ import {
 } from "docx";
 import { jsPDF } from "jspdf";
 import { FIELD_MAP, type ObservedDeclaration } from "./observations";
-import { RULE_CATALOG, computeHeadline, evaluateRules } from "./rules";
+import { RULE_CATALOG, computeHeadline, evaluateRules, resultsForHeadline } from "./rules";
 import type { InspectionRecord } from "./store";
 import type {
   CheckResult,
@@ -328,7 +328,7 @@ export function buildReportModel(
     inspectionDate: inspection.createdAt,
     confirmedAt,
     isDraft: inspection.status !== "confirmed" || confirmedAt === null,
-    headline: computeHeadline(results),
+    headline: computeHeadline(resultsForHeadline(results, review.findingDecisions)),
     coverageConfirmed: ctx.coverageConfirmed,
     declarations,
     findings,

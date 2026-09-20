@@ -25,6 +25,35 @@ import type { ReportHeadline } from "@/lib/types";
 type HeadlineFilter = "All" | ReportHeadline;
 type SortKey = "newest" | "oldest" | "photos-desc" | "photos-asc";
 
+function CoverThumb({
+  src,
+  alt,
+  unavailableLabel,
+}: {
+  src: string;
+  alt: string;
+  unavailableLabel: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <div className="flex h-40 w-full flex-col items-center justify-center gap-1 bg-slate-50 px-4 text-center">
+        <PackageSearch className="h-8 w-8 text-slate-300" />
+        <p className="text-xs font-medium text-slate-500">{unavailableLabel}</p>
+      </div>
+    );
+  }
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- stored Blob / unrestorable http URLs, not Next image optimizer
+    <img
+      src={src}
+      alt={alt}
+      className="h-40 w-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 type UnifiedEntry = {
   key: string;
   kind: "inspection" | "legacy";
@@ -45,7 +74,7 @@ type UnifiedEntry = {
 const HEADLINE_OPTIONS: { value: HeadlineFilter; label: string }[] = [
   { value: "All", label: "All headlines" },
   { value: "suspected violation", label: "Suspected violation" },
-  { value: "no issue found in assessed checks", label: "No issue found" },
+  { value: "no issue found in assessed checks", label: "No issue found in assessed checks" },
   { value: "insufficient evidence", label: "Insufficient evidence" },
 ];
 
@@ -447,15 +476,10 @@ export default function RepositoryPage() {
                 className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm"
               >
                 {cover ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <CoverThumb
                     src={cover}
                     alt={entry.title}
-                    className="h-40 w-full object-cover"
-                    onError={(e) => {
-                      if (e.currentTarget.src.endsWith("/placeholder.svg")) return;
-                      e.currentTarget.src = "/placeholder.svg";
-                    }}
+                    unavailableLabel="evidence unavailable — the original image cannot be restored"
                   />
                 ) : (
                   <div className="flex h-40 w-full flex-col items-center justify-center gap-1 bg-slate-50 px-4 text-center">

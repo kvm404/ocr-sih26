@@ -399,6 +399,25 @@ export function computeHeadline(results: RuleResult[]): ReportHeadline {
   return 'no issue found in assessed checks';
 }
 
+/**
+ * Copy of rule results for headline / dashboard labels. A reviewer who
+ * rejects a suspected violation is deciding it is not an issue; the original
+ * `RuleResult` is left unchanged for the report (which still records the
+ * rejection). Accepted and pending suspected violations still win.
+ */
+export function resultsForHeadline(
+  results: RuleResult[],
+  decisions?: Partial<Record<string, 'accepted' | 'rejected'>> | null,
+): RuleResult[] {
+  const list = Array.isArray(results) ? results : [];
+  if (!decisions) return list;
+  return list.map((result) => {
+    if (result.result !== 'suspected_violation') return result;
+    if (decisions[result.ruleId] !== 'rejected') return result;
+    return { ...result, result: 'no_issue_found', needsReview: false };
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /* Internal numeric score (internal testing ONLY)                       */
 /* ------------------------------------------------------------------ */
