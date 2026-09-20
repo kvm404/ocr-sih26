@@ -10,15 +10,16 @@ import ReviewPanel, {
 } from "@/components/ReviewPanel";
 import { Notice, type NoticeCopy } from "@/components/Notice";
 import { photoBlobToJpegDataUrl } from "@/lib/image";
-import { saveReview } from "@/lib/review-store";
+import { describeReviewError, ReviewStoreError, saveReview } from "@/lib/review-store";
 import { analyzePackage, describeModelError } from "@/lib/model-client";
 import { errorDetail, log } from "@/lib/log";
 import type { ExtractionResult } from "@/lib/observations";
-import { computeHeadline, evaluateRules } from "@/lib/rules";
+import { computeHeadline, evaluateRules, resultsForHeadline } from "@/lib/rules";
 import {
   addPhotos,
   createInspection,
   describeStoreError,
+  getInspection,
   isStorageAvailable,
   removePhoto,
   saveInspection,
@@ -100,9 +101,12 @@ export default function ScanPage() {
   const [stage, setStage] = useState<"photos" | "review">("photos");
 
   const creatingRef = useRef<Promise<InspectionRecord> | null>(null);
+  const recordRef = useRef<InspectionRecord | null>(null);
+  const photoWriteChain = useRef(Promise.resolve());
 
   useEffect(() => {
     if (!isStorageAvailable()) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time storage availability banner
       setError({
         title: "Browser storage is unavailable",
         detail: "Photos cannot be saved in this browser.",
@@ -121,6 +125,10 @@ export default function ScanPage() {
   useEffect(() => {
     urlsRef.current = photoUrls;
   }, [photoUrls]);
+
+  useEffect(() => {
+    recordRef.current = record;
+  }, [record]);
 
   const uploadPhotos: UploadZonePhoto[] = useMemo(() => {
     if (!record) return [];
@@ -159,7 +167,7 @@ export default function ScanPage() {
   }
 
   async function ensureRecord(): Promise<InspectionRecord> {
-    if (record) return record;
+    if (recordRef.current) return recordRef.current;
     if (!creatingRef.current) {
       creatingRef.current = createInspection({
         categoryHint: hint as CategoryHint,
@@ -167,6 +175,7 @@ export default function ScanPage() {
     }
     try {
       const created = await creatingRef.current;
+      recordRef.current = created;
       setRecord(created);
       return created;
     } catch (err) {
@@ -178,24 +187,37 @@ export default function ScanPage() {
   async function handleFilesSelect(files: File[]) {
     if (analyzing || confirming || files.length === 0) return;
     setError(null);
+    const previous = photoWriteChain.current;
+    let release!: () => void;
+    photoWriteChain.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
     try {
       const current = await ensureRecord();
       const added = await addPhotos(current.inspectionId, files);
+      const stored = await getInspection(current.inspectionId);
+      const next: InspectionRecord = stored ?? {
+        ...current,
+        photos: (() => {
+          const byId = new Map(current.photos.map((photo) => [photo.photoId, photo]));
+          for (const photo of added.photos) byId.set(photo.photoId, photo);
+          return [...byId.values()];
+        })(),
+        updatedAt: added.updatedAt,
+      };
       const urls: Record<string, string> = {};
       for (const photo of added.photos) {
         urls[photo.photoId] = URL.createObjectURL(photo.blob);
       }
       setPhotoUrls((prev) => ({ ...prev, ...urls }));
-      setRecord({
-        ...current,
-        photos: [...current.photos, ...added.photos],
-        updatedAt: added.updatedAt,
-      });
+      recordRef.current = next;
+      setRecord(next);
       log.info("scan", "photos_saved", "Photographs stored for this inspection", {
         data: {
           inspectionId: current.inspectionId,
           added: added.photos.length,
-          total: current.photos.length + added.photos.length,
+          total: next.photos.length,
         },
       });
       if (extraction) {
@@ -208,14 +230,27 @@ export default function ScanPage() {
         data: { count: files.length },
       });
       setError(describeStoreError(err));
+    } finally {
+      release();
     }
   }
 
   async function handleRemovePhoto(photoId: string) {
-    if (!record || analyzing || confirming) return;
+    if (!recordRef.current || analyzing || confirming) return;
     setError(null);
+    const previous = photoWriteChain.current;
+    let release!: () => void;
+    photoWriteChain.current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    const current = recordRef.current;
+    if (!current) {
+      release();
+      return;
+    }
     try {
-      const updated = await removePhoto(record.inspectionId, photoId);
+      const updated = await removePhoto(current.inspectionId, photoId);
       const url = photoUrls[photoId];
       if (url) URL.revokeObjectURL(url);
       setPhotoUrls((prev) => {
@@ -223,6 +258,7 @@ export default function ScanPage() {
         delete next[photoId];
         return next;
       });
+      recordRef.current = updated;
       setRecord(updated);
       if (extraction) {
         resetAnalysis("Photos changed — run the analysis again on the new set.");
@@ -232,6 +268,8 @@ export default function ScanPage() {
         title: "Photo was not removed",
         detail: describeStoreError(err).detail,
       });
+    } finally {
+      release();
     }
   }
 
@@ -242,6 +280,7 @@ export default function ScanPage() {
     importStatus: ImportStatus,
     coverageConfirmed: boolean,
     photoCount: number,
+    decisions: Record<string, "accepted" | "rejected"> = {},
   ): { results: RuleResult[]; headline: ReportHeadline } {
     const inputs = buildReviewedInputs(observations, correctedTexts);
     const results = evaluateRules(inputs, {
@@ -250,7 +289,10 @@ export default function ScanPage() {
       coverageConfirmed,
       photoCount,
     });
-    return { results, headline: computeHeadline(results) };
+    return {
+      results,
+      headline: computeHeadline(resultsForHeadline(results, decisions)),
+    };
   }
 
   function persistReviewPayload(
@@ -328,20 +370,22 @@ export default function ScanPage() {
       const initialReview: ReviewState = {
         correctedTexts: {},
         reviewedCategory: ctxCategory,
-        reviewedImport: parsed.importSuggestion,
+        reviewedImport: "unknown",
         coverageConfirmed: false,
         decisions: {},
         productName: parsed.identity.productName ?? "",
         brand: parsed.identity.brand ?? "",
         samePackageConfirmed: false,
       };
-      // Draft evaluation: coverage unconfirmed, so nothing can be called
-      // missing yet — absent declarations stay "not assessed".
+      // Draft evaluation: coverage unconfirmed and import unconfirmed, so
+      // nothing can be called missing yet — absent declarations stay
+      // "not assessed". The model import suggestion is shown in the panel
+      // but does not run the importer limb until the reviewer confirms it.
       const { results, headline: draftHeadline } = runRules(
         parsed.observations,
         {},
         ctxCategory,
-        parsed.importSuggestion,
+        "unknown",
         false,
         record.photos.length,
       );
@@ -351,13 +395,24 @@ export default function ScanPage() {
       setHeadline(draftHeadline);
       setConfirmedAt(null);
 
+      try {
+        persistReviewPayload(record.inspectionId, parsed, initialReview, null);
+      } catch (persistErr) {
+        setError({
+          title: "Analysis was not saved",
+          detail: describeReviewError(persistErr).detail,
+        });
+        setStage("review");
+        window.scrollTo(0, 0);
+        return;
+      }
       const analyzed = await saveInspection({
         ...record,
         categoryHint: hint as CategoryHint,
         status: "analyzed",
       });
+      recordRef.current = analyzed;
       setRecord(analyzed);
-      persistReviewPayload(record.inspectionId, parsed, initialReview, null);
       setStage("review");
       window.scrollTo(0, 0);
       log.info("scan", "analyze_ok", "Analysis stored as a draft review", {
@@ -394,10 +449,18 @@ export default function ScanPage() {
       next.reviewedImport,
       next.coverageConfirmed,
       record.photos.length,
+      next.decisions,
     );
     setRuleResults(results);
     setHeadline(nextHeadline);
-    persistReviewPayload(record.inspectionId, extraction, next, null);
+    try {
+      persistReviewPayload(record.inspectionId, extraction, next, null);
+    } catch (err) {
+      setError({
+        title: "Review was not saved",
+        detail: describeReviewError(err).detail,
+      });
+    }
   }
 
   const confirmBlockers = useMemo(() => {
@@ -434,19 +497,23 @@ export default function ScanPage() {
     setConfirming(true);
     try {
       const at = new Date().toISOString();
+      persistReviewPayload(record.inspectionId, extraction, review, at);
       const confirmed = await saveInspection({
         ...record,
         categoryHint: review.reviewedCategory as CategoryHint,
         status: "confirmed",
       });
+      recordRef.current = confirmed;
       setRecord(confirmed);
-      persistReviewPayload(record.inspectionId, extraction, review, at);
       setConfirmedAt(at);
       router.push(`/report/${record.inspectionId}`);
     } catch (err) {
       setError({
         title: "Confirmation was not saved",
-        detail: describeStoreError(err).detail,
+        detail:
+          err instanceof ReviewStoreError
+            ? describeReviewError(err).detail
+            : describeStoreError(err).detail,
       });
       setConfirming(false);
     }

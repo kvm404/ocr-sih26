@@ -8,7 +8,7 @@ import { log, errorDetail } from "@/lib/log";
 export type CameraCaptureProps = {
   initialFacing: CameraFacing;
   onClose: () => void;
-  onCapture: (file: File) => void;
+  onCapture: (file: File) => void | Promise<void>;
   onUseDeviceCamera: () => void;
 };
 
@@ -40,6 +40,7 @@ export default function CameraCapture({
     const scrollY = window.scrollY;
 
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset live preview when facing changes
     setReady(false);
     setError(null);
     log.info("camera", "start", `Opening ${facing} camera`, { data: { facing } });
@@ -136,7 +137,7 @@ export default function CameraCapture({
       const file = new File([blob], `package-${Date.now()}.jpg`, {
         type: "image/jpeg",
       });
-      onCapture(file);
+      await onCapture(file);
       log.info("camera", "capture", "Saved a still from the live camera", {
         data: {
           facing,

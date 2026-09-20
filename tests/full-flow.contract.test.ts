@@ -377,6 +377,28 @@ describe("full-flow contract (controlled model response, no network)", () => {
     expect(computeHeadline([])).toBe("insufficient evidence");
   });
 
+  it("export headline drops a reviewer-rejected suspected violation but keeps the finding", () => {
+    const result = parseExtractionResponse(controlledEnvelope(), PHOTO_IDS);
+    const inspection = confirmedInspection();
+    const observations = result.observations.map((o) =>
+      o.field === "mrp" ? { ...o, value: null, confidence: "ok" as const } : o,
+    );
+    const model = buildReportModel(inspection, observations, {
+      productName: "Acme Biscuits",
+      brand: "Acme",
+      category: "household",
+      importStatus: "domestic",
+      coverageConfirmed: true,
+      reviewedValues: { mrp: null },
+      findingDecisions: { mrp: "rejected" },
+      confirmedAt: "2026-09-18T01:00:00.000Z",
+    });
+    expect(model.headline).toBe("no issue found in assessed checks");
+    const mrp = model.findings.find((f) => f.ruleId === "mrp");
+    expect(mrp?.result).toBe("suspected_violation");
+    expect(mrp?.decision).toBe("rejected");
+  });
+
   it("save/reopen shape: photographs and review state survive a storage round-trip", () => {
     const inspection = draftInspection();
     const result = parseExtractionResponse(controlledEnvelope(), PHOTO_IDS);

@@ -27,6 +27,7 @@ import {
   buildExtractionPrompt,
   buildPhotoExtractionPrompt,
   CATEGORIES,
+  hasExtractionPayload,
   parseExtractionResponse,
   type CategoryHint,
   type ExtractionResult,
@@ -280,9 +281,35 @@ async function throwForStatus(res: Response, endpoint: string): Promise<never> {
       { status, endpoint },
     );
   }
+  const looksLikeMissingModel =
+    parsed !== null &&
+    /model .+ not found|unknown model|does not exist|no model loaded|model is not/i.test(
+      parsed,
+    );
+  if (looksLikeMissingModel) {
+    throw new ModelClientError(
+      "MODEL_NOT_FOUND",
+      "The model request failed. Check the model id in Settings.",
+      { status, endpoint },
+    );
+  }
+  if (status === 413) {
+    throw new ModelClientError(
+      "BAD_REQUEST",
+      "The photographs are too large for the model server. Try fewer or smaller photographs.",
+      { status, endpoint },
+    );
+  }
+  if (status === 429) {
+    throw new ModelClientError(
+      "SERVER_ERROR",
+      "The model server is busy. Try again in a moment.",
+      { status, endpoint },
+    );
+  }
   throw new ModelClientError(
-    "MODEL_NOT_FOUND",
-    "The model request failed. Check the model id in Settings.",
+    "BAD_REQUEST",
+    "The model server rejected the request. No report was created.",
     { status, endpoint },
   );
 }
@@ -624,6 +651,16 @@ export async function analyzePackage(
       maxTokens: opts?.maxTokens ?? 2500,
       prompt,
     });
+    if (!hasExtractionPayload(raw)) {
+      log.error("model", "bad_response", "Unparseable completion content", {
+        code: "BAD_RESPONSE",
+        data: { photoId: photo.id, photoIndex: i + 1, photoCount: total },
+      });
+      throw new ModelClientError(
+        "BAD_RESPONSE",
+        "The vision model returned nothing usable. No report was created.",
+      );
+    }
     const parsed = parseExtractionResponse(raw, [photo.id]);
     if (!parsed.photoFaces.some((face) => face.photoId === photo.id)) {
       parsed.photoFaces = [{ photoId: photo.id, face: "unknown", note: "" }, ...parsed.photoFaces];

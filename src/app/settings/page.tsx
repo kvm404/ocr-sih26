@@ -51,6 +51,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     const current = getModelConfig();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate fields from persisted model prefs
     setBaseUrl(current.baseUrl);
     setModel(current.model);
     setKeyInMemory(hasApiKey());

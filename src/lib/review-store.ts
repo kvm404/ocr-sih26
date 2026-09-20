@@ -25,14 +25,78 @@
  * key (with extra headline/ruleResults/qualityFlags fields) are accepted
  * by extracting the seven canonical fields.
  *
- * Pure browser-storage module: never throws.
+ * `loadReview` never throws (missing or corrupt data is null). `saveReview`
+ * throws {@link ReviewStoreError} on quota or private-mode failures so
+ * callers cannot treat a no-op persist as success.
  */
 
 import { FIELD_MAP } from "./observations";
 import type { ObservedDeclaration, PackageIdentity, PhotoFace } from "./observations";
 import type { ImportStatus } from "./types";
+import { log } from "./log";
 
 export const REVIEW_STORE_KEY = "nyayapack.reviews.v1";
+
+export type ReviewStoreErrorCode = "unavailable" | "quota-exceeded";
+
+/** Typed sidecar persist failure. Thrown by `saveReview`; never swallowed. */
+export class ReviewStoreError extends Error {
+  readonly code: ReviewStoreErrorCode;
+
+  constructor(code: ReviewStoreErrorCode, message: string, options?: { cause?: unknown }) {
+    super(message, options as ErrorOptions | undefined);
+    this.name = "ReviewStoreError";
+    this.code = code;
+  }
+}
+
+/** Short copy for scan/report banners when the sidecar cannot be written. */
+export function describeReviewError(err: unknown): { title: string; detail: string } {
+  if (err instanceof ReviewStoreError) {
+    if (err.code === "quota-exceeded") {
+      return {
+        title: "This browser is out of storage",
+        detail: "The review was not saved. Remove old inspections, then try again.",
+      };
+    }
+    return {
+      title: "Browser storage is unavailable",
+      detail: "The review cannot be saved in this browser.",
+    };
+  }
+  return {
+    title: "The review was not saved",
+    detail: "Nothing new was saved. Try again.",
+  };
+}
+
+function toReviewStoreError(err: unknown, op: string): ReviewStoreError {
+  if (err instanceof ReviewStoreError) return err;
+  const name = err instanceof DOMException ? err.name : err instanceof Error ? err.name : "";
+  const detail = err instanceof Error ? err.message : String(err);
+  if (name === "QuotaExceededError" || /quota/i.test(detail)) {
+    const quota = new ReviewStoreError(
+      "quota-exceeded",
+      `Cannot ${op}: browser storage is full. The review was not saved.`,
+      { cause: err },
+    );
+    log.error("review-store", "quota_exceeded", quota.message, {
+      code: quota.code,
+      data: { op, cause: detail },
+    });
+    return quota;
+  }
+  const unavailable = new ReviewStoreError(
+    "unavailable",
+    `Cannot ${op}: browser storage is unavailable. The review was not saved.`,
+    { cause: err },
+  );
+  log.error("review-store", "unavailable", unavailable.message, {
+    code: unavailable.code,
+    data: { op, cause: detail, name },
+  });
+  return unavailable;
+}
 
 export type ReviewedImport = "imported" | "domestic" | "unknown";
 
@@ -152,11 +216,16 @@ function readUnifiedMap(): Record<string, unknown> {
 }
 
 function writeUnifiedMap(map: Record<string, unknown>): void {
+  if (typeof window === "undefined") {
+    throw new ReviewStoreError(
+      "unavailable",
+      "Cannot save review: browser storage is unavailable. The review was not saved.",
+    );
+  }
   try {
-    if (typeof window === "undefined") return;
     window.localStorage.setItem(REVIEW_STORE_KEY, JSON.stringify(map));
-  } catch {
-    // Storage unavailable/quota: on-screen review still works this session.
+  } catch (err) {
+    throw toReviewStoreError(err, "save review");
   }
 }
 
@@ -295,33 +364,39 @@ export function loadReview(inspectionId: string): ReviewPayload | null {
   }
 }
 
-/** Persist the unified review payload (draft or confirmed). Never throws. */
+/** Persist the unified review payload (draft or confirmed). Throws on quota/unavailable. */
 export function saveReview(inspectionId: string, payload: ReviewPayload): void {
-  try {
-    if (typeof window === "undefined") return;
-    if (!inspectionId) return;
-    const map = readUnifiedMap();
-    map[inspectionId] = {
-      observations: Array.isArray(payload.observations) ? payload.observations : [],
-      correctedTexts: normalizeCorrectedTexts(payload.correctedTexts),
-      reviewedCategory: normalizeCategory(payload.reviewedCategory),
-      reviewedImport: normalizeImport(payload.reviewedImport),
-      coverageConfirmed: payload.coverageConfirmed === true,
-      decisions: normalizeDecisions(payload.decisions),
-      confirmedAt: normalizeConfirmedAt(payload.confirmedAt),
-      productName: normalizeCategory(payload.productName),
-      brand: normalizeCategory(payload.brand),
-      photoFaces: Array.isArray(payload.photoFaces) ? payload.photoFaces : [],
-      samePackage:
-        payload.samePackage === true ? true : payload.samePackage === false ? false : null,
-      mismatchNote: normalizeCategory(payload.mismatchNote),
-    } satisfies ReviewPayload;
-    writeUnifiedMap(map);
-    // The unified key is now canonical; remove any stale per-id copy.
-    removeLegacyPerIdKey(inspectionId);
-  } catch {
-    // Storage may be unavailable: on-screen review still works this session.
+  if (typeof window === "undefined") {
+    throw new ReviewStoreError(
+      "unavailable",
+      "Cannot save review: browser storage is unavailable. The review was not saved.",
+    );
   }
+  if (!inspectionId) {
+    throw new ReviewStoreError(
+      "unavailable",
+      "Cannot save review: missing inspection id. The review was not saved.",
+    );
+  }
+  const map = readUnifiedMap();
+  map[inspectionId] = {
+    observations: Array.isArray(payload.observations) ? payload.observations : [],
+    correctedTexts: normalizeCorrectedTexts(payload.correctedTexts),
+    reviewedCategory: normalizeCategory(payload.reviewedCategory),
+    reviewedImport: normalizeImport(payload.reviewedImport),
+    coverageConfirmed: payload.coverageConfirmed === true,
+    decisions: normalizeDecisions(payload.decisions),
+    confirmedAt: normalizeConfirmedAt(payload.confirmedAt),
+    productName: normalizeCategory(payload.productName),
+    brand: normalizeCategory(payload.brand),
+    photoFaces: Array.isArray(payload.photoFaces) ? payload.photoFaces : [],
+    samePackage:
+      payload.samePackage === true ? true : payload.samePackage === false ? false : null,
+    mismatchNote: normalizeCategory(payload.mismatchNote),
+  } satisfies ReviewPayload;
+  writeUnifiedMap(map);
+  // The unified key is now canonical; remove any stale per-id copy.
+  removeLegacyPerIdKey(inspectionId);
 }
 
 /** Remove the unified review payload (and any stale per-id copy). */

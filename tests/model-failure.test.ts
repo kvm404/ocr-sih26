@@ -8,6 +8,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  analyzePackage,
   analyzePhotos,
   describeModelError,
   ModelClientError,
@@ -97,5 +98,117 @@ describe("model-failure path: error, no report", () => {
     const err = await analyzePhotos([PHOTO]).catch((e) => e);
     expect(err).toBeInstanceOf(ModelClientError);
     expect((err as ModelClientError).code).toBe("BAD_RESPONSE");
+  });
+
+  it("HTTP 400 rejected payload is not MODEL_NOT_FOUND", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "invalid image payload" }), {
+          status: 400,
+          statusText: "Bad Request",
+        }),
+      ),
+    );
+    const err = await analyzePhotos([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("BAD_REQUEST");
+    const copy = describeModelError(err);
+    expect(copy.title).not.toBe("The model was not found");
+  });
+
+  it("HTTP 413 is not MODEL_NOT_FOUND", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("too large", { status: 413 })),
+    );
+    const err = await analyzePhotos([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("BAD_REQUEST");
+    expect(describeModelError(err).title).not.toBe("The model was not found");
+  });
+
+  it("HTTP 429 is not MODEL_NOT_FOUND", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("slow down", { status: 429 })),
+    );
+    const err = await analyzePhotos([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("SERVER_ERROR");
+    expect(describeModelError(err).title).not.toBe("The model was not found");
+  });
+
+  it("HTTP 400 that names a missing model stays MODEL_NOT_FOUND", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: "Model qwen3-vl-4b does not exist" }), {
+          status: 400,
+        }),
+      ),
+    );
+    const err = await analyzePhotos([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("MODEL_NOT_FOUND");
+  });
+
+  it("analyzePackage: 200 choices with empty content is BAD_RESPONSE, not package_ok", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ choices: [{ message: { content: "" } }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    const err = await analyzePackage([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("BAD_RESPONSE");
+  });
+
+  it("analyzePackage: 200 choices with non-JSON content is BAD_RESPONSE, not package_ok", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [{ message: { content: "sorry, I cannot read this" } }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const err = await analyzePackage([PHOTO]).catch((e) => e);
+    expect(err).toBeInstanceOf(ModelClientError);
+    expect((err as ModelClientError).code).toBe("BAD_RESPONSE");
+  });
+
+  it("analyzePackage: parseable empty observations is not a transport failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    observations: [],
+                    categoryUncertain: true,
+                    importSuggestion: "unknown",
+                  }),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      ),
+    );
+    const result = await analyzePackage([PHOTO]);
+    expect(result.observations).toEqual([]);
+    expect(result.unattestedPhotoIds).toEqual([PHOTO.id]);
   });
 });
