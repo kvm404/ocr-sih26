@@ -15,7 +15,6 @@ import {
   Play,
   ScanLine,
   Scale,
-  Type,
   UserRound,
 } from "lucide-react";
 import InspectionPreview from "@/components/landing/InspectionPreview";
@@ -71,7 +70,7 @@ const CHECKS = [
   },
   {
     title: "Manufacturing date",
-    body: "Month and year of manufacture, packing, or import.",
+    body: "Month and year of manufacture, where the reviewed rule requires it. Not a packing or import date check.",
     icon: Calendar,
   },
   {
@@ -79,19 +78,14 @@ const CHECKS = [
     body: "A phone number, email, or address for complaints.",
     icon: Phone,
   },
-  {
-    title: "Font and readability",
-    body: "Letter height and contrast so the declaration can be read.",
-    icon: Type,
-  },
 ];
 
 const CHECK_COLUMNS = [CHECKS.slice(0, 3), CHECKS.slice(3)];
 
 const RESULTS = [
   {
-    title: "No issue found",
-    body: "Applicable checks passed on the evidence in the photographs.",
+    title: "No issue found in assessed checks",
+    body: "Checks that could be assessed showed no suspected violation. Unassessed checks are not passes.",
     icon: CheckCircle2,
     iconClass: "bg-emerald-50 text-emerald-700",
     titleClass: "text-emerald-800",

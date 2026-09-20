@@ -667,6 +667,14 @@ function extractPayload(raw: unknown): Record<string, unknown> | null {
   return null;
 }
 
+/**
+ * True when raw model output contains parseable extraction JSON.
+ * Empty or non-JSON completion content is not a successful empty reading.
+ */
+export function hasExtractionPayload(raw: unknown): boolean {
+  return extractPayload(raw) !== null;
+}
+
 export function emptyIdentity(): PackageIdentity {
   return { brand: null, productName: null, samePackage: null, mismatchNote: null };
 }

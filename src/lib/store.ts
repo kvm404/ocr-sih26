@@ -42,7 +42,6 @@ export type CategoryHint =
   | "personal-care"
   | "household"
   | "other"
-  // eslint-disable-next-line @typescript-eslint/ban-types
   | (string & {});
 
 export const CATEGORY_HINTS: readonly CategoryHint[] = [

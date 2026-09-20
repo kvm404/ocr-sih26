@@ -200,7 +200,7 @@ function headlineLabel(headline: ReportHeadline): string {
     case "suspected violation":
       return "Suspected violation";
     case "no issue found in assessed checks":
-      return "No issue found";
+      return "No issue found in assessed checks";
     case "insufficient evidence":
       return "Insufficient evidence";
   }
@@ -344,7 +344,7 @@ export default function DashboardPage() {
         },
         {
           key: "noIssue" as const,
-          label: "No issue found",
+          label: "No issue found in assessed checks",
           value: stats.noIssue,
           bar: "bg-green-600",
         },
@@ -434,9 +434,9 @@ export default function DashboardPage() {
           tone="red"
         />
         <StatCard
-          title="No issue found"
+          title="No issue found in assessed checks"
           value={loading ? "…" : stats.noIssue}
-          subtitle="In assessed checks"
+          subtitle="Unassessed checks are not passes"
           icon={<CheckCircle2 className="h-4 w-4" aria-hidden="true" />}
           tone="green"
         />

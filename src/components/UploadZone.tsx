@@ -30,7 +30,7 @@ export interface UploadZoneProps {
   photos: UploadZonePhoto[];
   categoryHint: string;
   onCategoryHintChange: (hint: string) => void;
-  onFilesSelect: (files: File[]) => void;
+  onFilesSelect: (files: File[]) => void | Promise<void>;
   onRemovePhoto: (photoId: string) => void;
   currentStep: number;
   disabled?: boolean;
@@ -66,12 +66,12 @@ export default function UploadZone({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<CameraFacing>("user");
 
-  function handleFiles(files: FileList | File[] | null) {
+  function handleFiles(files: FileList | File[] | null): void | Promise<void> {
     if (!files) return;
     const list = Array.from(files).filter((file) =>
       file.type.startsWith("image/"),
     );
-    if (list.length > 0) onFilesSelect(list);
+    if (list.length > 0) return onFilesSelect(list);
   }
 
   function openDeviceCamera() {

@@ -26,7 +26,12 @@ import {
 } from "@/lib/export";
 import type { ObservedDeclaration } from "@/lib/observations";
 import { FIELD_MAP } from "@/lib/observations";
-import { loadReview, saveReview, type ReviewPayload } from "@/lib/review-store";
+import {
+  describeReviewError,
+  loadReview,
+  saveReview,
+  type ReviewPayload,
+} from "@/lib/review-store";
 import {
   createPhotoObjectUrl,
   describeStoreError,
@@ -258,15 +263,23 @@ export default function ReportPage() {
   // (and a reload) reopens the same corrections/decisions/confirmed state.
   useEffect(() => {
     if (phase.kind !== "ready" || !inspection) return;
-    saveReview(
-      inspection.inspectionId,
-      overlayToPayload(overlay, observations, identityExtras),
-    );
+    try {
+      saveReview(
+        inspection.inspectionId,
+        overlayToPayload(overlay, observations, identityExtras),
+      );
+    } catch (err) {
+      const copy = describeReviewError(err);
+      queueMicrotask(() => {
+        setConfirmError({ title: copy.title, detail: copy.detail });
+      });
+    }
   }, [phase.kind, inspection, observations, overlay, identityExtras]);
 
   // Object URLs for stored photo bytes; revoked when photos change/unmount.
   useEffect(() => {
     if (!inspection) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- revoke/replace object URLs when the inspection is gone
       setPhotoUrls({});
       return;
     }
